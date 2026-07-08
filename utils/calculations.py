@@ -22,11 +22,11 @@ def calc_achievement_rate(
         return min((actual / target) * 100, 150.0)
 
     elif indicator_type == "negative":
-        if actual <= target:
-            return 100.0
         if target == 0:
-            return 0.0
-        return max(0.0, (1 - (actual - target) / target) * 100)
+            return 100.0 if actual == 0 else 0.0
+        if actual <= 0:
+            return 150.0
+        return min((target / actual) * 100, 150.0)
 
     elif indicator_type == "qualitative":
         # actual 传入字符串评级，这里转为数字处理
@@ -160,6 +160,8 @@ def calculate_d_stage(indicators: List[Dict], actuals: Dict[str, Any]) -> Dict:
     return {
         "indicator_results": indicator_results,
         "weighted_achievement": round(weighted_achievement, 1),
+        "overall_progress": round(weighted_achievement, 1),
+        "time_progress": time_progress,
         "deviation": round(deviation, 1),
         "overall_status": overall_status,
         "redline_triggered": redline_triggered,

@@ -14,6 +14,7 @@ import {
   useSelfAssessment, usePendingEvaluationTasks, useFinalResult, useGoalEvaluations,
 } from '@/hooks'
 import { checkApi } from '@/api/check'
+import { hasInvalidScores, parseScoreInput, toScorePayload } from '@/lib/scores'
 
 const GRADE_MAP: Record<string, { label: string; variant: 'default' | 'secondary' | 'outline' | 'destructive' }> = {
   S: { label: 'S - 优秀', variant: 'default' },
@@ -42,45 +43,90 @@ export function CheckPage() {
 
   const { mutate: saveDraft, isPending: savePending } = useMutation({
     mutationFn: () => {
-      const parsed = Object.fromEntries(Object.entries(items).map(([k, v]) => [k, { score: parseFloat(v.score) || 0, comment: v.comment }]))
+      if (hasInvalidScores(items)) {
+        throw new Error('评分必须在 0-100 之间')
+      }
+      const parsed = toScorePayload(items)
       if (selfAssessment?.id) return checkApi.updateSelfAssessment(selfAssessment.id, parsed)
       return checkApi.createSelfAssessment(goal!.id, parsed)
     },
-    onSuccess: () => { toast.success('草稿已保存'); qc.invalidateQueries({ queryKey: ['self-assessment'] }) },
+    onSuccess: () => { toast.success('草稿已保存'); qc.invalidateQueries({ queryKey: ['self-assessment', goal?.id] }) },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : '保存失败')
+    },
   })
 
   const { mutate: submitSA, isPending: submitPending } = useMutation({
     mutationFn: async () => {
+      if (hasInvalidScores(items)) {
+        throw new Error('评分必须在 0-100 之间')
+      }
       if (!selfAssessment?.id) {
-        const created = await checkApi.createSelfAssessment(goal!.id, Object.fromEntries(Object.entries(items).map(([k, v]) => [k, { score: parseFloat(v.score) || 0, comment: v.comment }])))
+        const created = await checkApi.createSelfAssessment(goal!.id, toScorePayload(items))
         return checkApi.submitSelfAssessment(created.id)
       }
       return checkApi.submitSelfAssessment(selfAssessment.id)
     },
-    onSuccess: () => { toast.success('自评已提交'); qc.invalidateQueries({ queryKey: ['self-assessment'] }); setConfirmOpen(false) },
+    onSuccess: () => {
+      toast.success('自评已提交')
+      qc.invalidateQueries({ queryKey: ['self-assessment', goal?.id] })
+      qc.invalidateQueries({ queryKey: ['eval-tasks'] })
+      qc.invalidateQueries({ queryKey: ['eval-tasks', 'pending'] })
+      setConfirmOpen(false)
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : '提交失败')
+    },
   })
 
   const { mutate: generateTasks, isPending: genTaskPending } = useMutation({
     mutationFn: () => checkApi.generateEvaluationTasks(goal!.id),
-    onSuccess: () => { toast.success('评估任务已生成'); qc.invalidateQueries({ queryKey: ['eval-tasks'] }) },
+    onSuccess: () => {
+      toast.success('评估任务已生成')
+      qc.invalidateQueries({ queryKey: ['eval-tasks'] })
+      qc.invalidateQueries({ queryKey: ['eval-tasks', 'pending'] })
+      qc.invalidateQueries({ queryKey: ['self-assessment', goal?.id] })
+    },
   })
 
   const { mutate: submitEval } = useMutation({
     mutationFn: ({ taskId, indicatorId }: { taskId: string; indicatorId: string }) => {
       const ev = evalScores[indicatorId]
-      return checkApi.submitEvaluation({ task_id: taskId, indicator_id: indicatorId, score: parseFloat(ev?.score ?? '0') || 0, comment: ev?.comment })
+      if (!ev || !Number.isFinite(Number(ev.score)) || Number(ev.score) < 0 || Number(ev.score) > 100) {
+        throw new Error('评分必须在 0-100 之间')
+      }
+      return checkApi.submitEvaluation({ task_id: taskId, indicator_id: indicatorId, score: Number(ev.score), comment: ev.comment })
     },
-    onSuccess: () => { toast.success('评分已提交'); qc.invalidateQueries({ queryKey: ['eval-tasks'] }) },
+    onSuccess: () => {
+      toast.success('评分已提交')
+      qc.invalidateQueries({ queryKey: ['eval-tasks'] })
+      qc.invalidateQueries({ queryKey: ['eval-tasks', 'pending'] })
+      qc.invalidateQueries({ queryKey: ['evaluations', goal?.id] })
+      qc.invalidateQueries({ queryKey: ['final-result', goal?.id] })
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : '评分提交失败')
+    },
   })
 
   const { mutate: generateResult, isPending: resultPending } = useMutation({
     mutationFn: () => checkApi.generateFinalResult(goal!.id),
-    onSuccess: () => { toast.success('最终结果已生成'); qc.invalidateQueries({ queryKey: ['final-result'] }) },
+    onSuccess: () => {
+      toast.success('最终结果已生成')
+      qc.invalidateQueries({ queryKey: ['final-result', goal?.id] })
+      qc.invalidateQueries({ queryKey: ['evaluations', goal?.id] })
+    },
   })
 
   const { mutate: confirmResult, isPending: confirmPending } = useMutation({
     mutationFn: () => checkApi.confirmFinalResult(finalResult!.id),
-    onSuccess: () => { toast.success('结果已确认'); qc.invalidateQueries({ queryKey: ['final-result'] }); qc.invalidateQueries({ queryKey: ['periods'] }) },
+    onSuccess: () => {
+      toast.success('结果已确认')
+      qc.invalidateQueries({ queryKey: ['final-result', goal?.id] })
+      qc.invalidateQueries({ queryKey: ['evaluations', goal?.id] })
+      qc.invalidateQueries({ queryKey: ['periods'] })
+      qc.invalidateQueries({ queryKey: ['periods', 'current'] })
+    },
   })
 
   if (!period || !goal) {
@@ -168,9 +214,15 @@ export function CheckPage() {
                       <span className="text-xs text-muted-foreground">权重 {Math.round(ind.weight * 100)}%</span>
                     </Label>
                     <div className="flex gap-2">
-                      <Input type="number" min={0} max={100} placeholder="分数 (0-100)" className="w-28"
+                      <Input type="number" min={0} max={100} placeholder="分数 (0-100)" className="w-36 shrink-0"
                         value={items[ind.id]?.score ?? selfAssessment?.items[ind.id]?.score ?? ''}
-                        onChange={(e) => setItems((prev) => ({ ...prev, [ind.id]: { ...prev[ind.id], score: e.target.value } }))}
+                        onChange={(e) => setItems((prev) => ({
+                          ...prev,
+                          [ind.id]: {
+                            ...prev[ind.id],
+                            score: parseScoreInput(e.target.value),
+                          },
+                        }))}
                       />
                       <Input placeholder="评价说明..."
                         value={items[ind.id]?.comment ?? selfAssessment?.items[ind.id]?.comment ?? ''}
@@ -263,9 +315,15 @@ export function CheckPage() {
                     <div key={task.id} className="flex flex-col gap-2 rounded-md border p-3">
                       <p className="text-sm font-medium">{ind?.name ?? task.indicator_id}</p>
                       <div className="flex gap-2">
-                        <Input type="number" min={0} max={100} placeholder="评分" className="w-24"
+                        <Input type="number" min={0} max={100} placeholder="分数 (0-100)" className="w-36 shrink-0"
                           value={evalScores[task.indicator_id]?.score ?? ''}
-                          onChange={(e) => setEvalScores((prev) => ({ ...prev, [task.indicator_id]: { ...prev[task.indicator_id], score: e.target.value } }))}
+                          onChange={(e) => setEvalScores((prev) => ({
+                            ...prev,
+                            [task.indicator_id]: {
+                              ...prev[task.indicator_id],
+                              score: parseScoreInput(e.target.value),
+                            },
+                          }))}
                         />
                         <Input placeholder="评价意见..."
                           value={evalScores[task.indicator_id]?.comment ?? ''}

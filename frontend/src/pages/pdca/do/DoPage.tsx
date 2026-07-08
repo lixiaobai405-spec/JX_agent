@@ -13,7 +13,7 @@ import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Sparkles, RefreshCw, MessageSquarePlus, ClipboardList, AlertCircle } from 'lucide-react'
+import { Sparkles, RefreshCw, MessageSquarePlus, ClipboardList, AlertCircle, ChevronDown, ChevronUp, Eye } from 'lucide-react'
 import {
   useCurrentPeriod, useCurrentGoal, useIndicators,
   useLatestDiagnostic, useMyCoachingRequests, useIndicatorCheckins,
@@ -21,7 +21,14 @@ import {
 import { doApi } from '@/api/do'
 import { TrafficLight } from '@/components/shared/TrafficLight'
 import { AILoadingSkeleton } from '@/components/shared/AILoadingSkeleton'
-import type { Indicator } from '@/types'
+import {
+  filterCoachingRequestsByGoal,
+  getCoachingResponseText,
+  getCoachingStatusLabel,
+  getDiagnosticToggleLabel,
+} from '@/lib/coaching'
+import { normalizeAgreementTerm } from '@/lib/copy'
+import type { CoachingRequest, Indicator } from '@/types'
 
 function CheckinDialog({ indicator, onCheckinSubmit }: { indicator: Indicator; onCheckinSubmit?: () => void }) {
   const [open, setOpen] = useState(false)
@@ -103,7 +110,7 @@ function CoachingDialog({ reportId }: { reportId?: string }) {
     }),
     onSuccess: () => {
       toast.success('辅导请求已发送给上级')
-      qc.invalidateQueries({ queryKey: ['coaching'] })
+      qc.invalidateQueries({ queryKey: ['coaching', 'my'] })
       setOpen(false)
     },
   })
@@ -147,6 +154,58 @@ function CoachingDialog({ reportId }: { reportId?: string }) {
   )
 }
 
+function CoachingRequestDetailDialog({ request }: { request: CoachingRequest }) {
+  const [open, setOpen] = useState(false)
+
+  return (
+    <>
+      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+        <Eye data-icon="inline-start" />
+        查看
+      </Button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>辅导请求详情</DialogTitle></DialogHeader>
+          <div className="flex flex-col gap-4 pt-2 text-sm">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <p className="text-xs text-muted-foreground">状态</p>
+                <p className="mt-1 font-medium">{getCoachingStatusLabel(request.status)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">紧急程度</p>
+                <p className="mt-1 font-medium">
+                  {{ low: '低', normal: '一般', high: '紧急' }[request.urgency_level]}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">创建时间</p>
+                <p className="mt-1 break-words font-medium">{request.created_at}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">更新时间</p>
+                <p className="mt-1 break-words font-medium">{request.updated_at}</p>
+              </div>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">请求原因</p>
+              <p className="mt-1 whitespace-pre-wrap rounded-lg bg-muted/50 p-3">
+                {request.request_reason?.trim() || '未填写请求原因'}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">上级回复</p>
+              <p className="mt-1 whitespace-pre-wrap rounded-lg bg-muted/50 p-3">
+                {getCoachingResponseText(request.notes)}
+              </p>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  )
+}
+
 function IndicatorCard({ indicator, onCheckinSubmit }: { indicator: Indicator; onCheckinSubmit?: () => void }) {
   const { data: checkins } = useIndicatorCheckins(indicator.id)
   const latestValue = checkins?.[0] ? (checkins[0].actual_value as Record<string, number>).value : null
@@ -179,17 +238,17 @@ export function DoPage() {
   const { data: allCoachingRequests } = useMyCoachingRequests()
   const qc = useQueryClient()
 
-  // Filter coaching requests to only show those for the current goal
-  const coachingRequests = allCoachingRequests?.filter(r => r.goal_id === goal?.id)
+  const coachingRequests = filterCoachingRequestsByGoal(allCoachingRequests, goal?.id)
 
   const [diagFeedback, setDiagFeedback] = useState('')
   const [hasPendingCheckin, setHasPendingCheckin] = useState(false)
+  const [isDiagnosticOpen, setIsDiagnosticOpen] = useState(true)
 
   const { mutate: generateDiag, isPending: genDiagPending } = useMutation({
     mutationFn: () => doApi.generateDiagnostic(goal!.id, diagFeedback || undefined),
     onSuccess: () => {
       toast.success('诊断报告生成完成')
-      qc.invalidateQueries({ queryKey: ['diagnostic'] })
+      qc.invalidateQueries({ queryKey: ['diagnostic', goal?.id] })
       setHasPendingCheckin(false)
     },
   })
@@ -198,7 +257,7 @@ export function DoPage() {
     return (
       <div className="flex flex-col gap-4 max-w-3xl">
         <h1 className="text-2xl font-semibold">D - 执行追踪</h1>
-        <Card><CardContent className="py-10 text-center text-muted-foreground">暂无考核期或合同未确认，请先完成 P 阶段</CardContent></Card>
+        <Card><CardContent className="py-10 text-center text-muted-foreground">暂无考核期或合约未确认，请先完成 P 阶段</CardContent></Card>
       </div>
     )
   }
@@ -244,7 +303,7 @@ export function DoPage() {
           {indLoading ? (
             <div className="flex flex-col gap-2">{[1, 2, 3].map((i) => <Skeleton key={i} className="h-16 w-full" />)}</div>
           ) : !indicators?.length ? (
-            <Card><CardContent className="py-6 text-center text-sm text-muted-foreground">暂无指标，请先完成 P 阶段确认合同</CardContent></Card>
+            <Card><CardContent className="py-6 text-center text-sm text-muted-foreground">暂无指标，请先完成 P 阶段确认合约</CardContent></Card>
           ) : (
             <div className="flex flex-col gap-2">
               {indicators.map((ind) => (
@@ -280,53 +339,74 @@ export function DoPage() {
               <CardHeader className="pb-2">
                 <CardTitle className="flex items-center justify-between text-sm">
                   <span>诊断结果 · {diagnostic.report_date?.slice(0, 10)}</span>
-                  <TrafficLight status={diagnostic.traffic_light_status} />
+                  <div className="flex items-center gap-1">
+                    <TrafficLight status={diagnostic.traffic_light_status} />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={getDiagnosticToggleLabel(isDiagnosticOpen)}
+                      title={getDiagnosticToggleLabel(isDiagnosticOpen)}
+                      onClick={() => setIsDiagnosticOpen((value) => !value)}
+                    >
+                      {isDiagnosticOpen ? <ChevronUp /> : <ChevronDown />}
+                    </Button>
+                  </div>
                 </CardTitle>
               </CardHeader>
-              <CardContent className="flex flex-col gap-3 text-sm">
-                {diagnostic.root_cause_analysis && (
-                  <div>
-                    <p className="font-medium mb-1 text-muted-foreground">根因分析</p>
-                    <div className="prose prose-sm max-w-none dark:prose-invert">
-                      <ReactMarkdown>{
-                        typeof diagnostic.root_cause_analysis === 'string'
-                          ? diagnostic.root_cause_analysis
-                          : JSON.stringify(diagnostic.root_cause_analysis)
-                      }</ReactMarkdown>
+              {isDiagnosticOpen && (
+                <CardContent className="flex flex-col gap-3 text-sm">
+                  {diagnostic.root_cause_analysis && (
+                    <div>
+                      <p className="font-medium mb-1 text-muted-foreground">根因分析</p>
+                      <div className="prose prose-sm max-w-none dark:prose-invert">
+                        <ReactMarkdown>{
+                          typeof diagnostic.root_cause_analysis === 'string'
+                            ? normalizeAgreementTerm(diagnostic.root_cause_analysis)
+                            : normalizeAgreementTerm(JSON.stringify(diagnostic.root_cause_analysis))
+                        }</ReactMarkdown>
+                      </div>
                     </div>
-                  </div>
-                )}
-                {diagnostic.improvement_suggestions && (
-                  <div>
-                    <p className="font-medium mb-1 text-muted-foreground">改进建议</p>
-                    <div className="prose prose-sm max-w-none dark:prose-invert">
-                      <ReactMarkdown>{
-                        typeof diagnostic.improvement_suggestions === 'string'
-                          ? diagnostic.improvement_suggestions
-                          : (diagnostic.improvement_suggestions as Record<string, string>).feedback ?? JSON.stringify(diagnostic.improvement_suggestions)
-                      }</ReactMarkdown>
+                  )}
+                  {diagnostic.improvement_suggestions && (
+                    <div>
+                      <p className="font-medium mb-1 text-muted-foreground">改进建议</p>
+                      <div className="prose prose-sm max-w-none dark:prose-invert">
+                        <ReactMarkdown>{
+                          typeof diagnostic.improvement_suggestions === 'string'
+                            ? normalizeAgreementTerm(diagnostic.improvement_suggestions)
+                            : normalizeAgreementTerm((diagnostic.improvement_suggestions as Record<string, string>).feedback ?? JSON.stringify(diagnostic.improvement_suggestions))
+                        }</ReactMarkdown>
+                      </div>
                     </div>
-                  </div>
-                )}
-              </CardContent>
+                  )}
+                </CardContent>
+              )}
             </Card>
           )}
 
-          {(coachingRequests?.length ?? 0) > 0 && (
-            <div className="flex flex-col gap-2">
-              <h3 className="text-sm font-medium text-muted-foreground">我的辅导请求</h3>
-              {coachingRequests!.map((req) => (
+          <div className="flex flex-col gap-2">
+            <h3 className="text-sm font-medium text-muted-foreground">我的辅导请求</h3>
+            {coachingRequests.length === 0 ? (
+              <Card>
+                <CardContent className="py-6 text-center text-sm text-muted-foreground">暂无数据</CardContent>
+              </Card>
+            ) : (
+              coachingRequests.map((req) => (
                 <Card key={req.id}>
-                  <CardContent className="flex items-center justify-between py-3 text-sm">
-                    <span className="text-muted-foreground">{req.request_reason?.slice(0, 30) ?? '辅导请求'}</span>
-                    <Badge variant={req.status === 'completed' ? 'secondary' : req.status === 'accepted' ? 'default' : 'outline'}>
-                      {{ pending: '待处理', accepted: '已接受', completed: '已完成', rejected: '已拒绝' }[req.status]}
-                    </Badge>
+                  <CardContent className="flex items-center justify-between gap-3 py-3 text-sm">
+                    <span className="min-w-0 flex-1 truncate text-muted-foreground">{req.request_reason?.slice(0, 30) ?? '辅导请求'}</span>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <Badge variant={req.status === 'completed' ? 'secondary' : req.status === 'accepted' ? 'default' : 'outline'}>
+                        {getCoachingStatusLabel(req.status)}
+                      </Badge>
+                      <CoachingRequestDetailDialog request={req} />
+                    </div>
                   </CardContent>
                 </Card>
-              ))}
-            </div>
-          )}
+              ))
+            )}
+          </div>
         </div>
       </div>
     </div>

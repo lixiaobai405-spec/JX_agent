@@ -1,15 +1,23 @@
 from datetime import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 # Self Assessment
+class SelfAssessmentItem(BaseModel):
+    score: float = Field(ge=0, le=100)
+    comment: str | None = None
+
+    def __getitem__(self, key: str):
+        return getattr(self, key)
+
+
 class SelfAssessmentCreate(BaseModel):
     goal_id: str
-    items: dict
+    items: dict[str, SelfAssessmentItem]
 
 
 class SelfAssessmentUpdate(BaseModel):
-    items: dict | None = None
+    items: dict[str, SelfAssessmentItem] | None = None
 
 
 class SelfAssessmentResponse(BaseModel):
@@ -50,7 +58,7 @@ class EvaluationTaskResponse(BaseModel):
 class EvaluationCreate(BaseModel):
     task_id: str
     indicator_id: str
-    score: float
+    score: float = Field(ge=0, le=100)
     comment: str | None = None
 
 

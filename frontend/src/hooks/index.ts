@@ -3,7 +3,12 @@ import { authApi } from '@/api/auth'
 import { periodsApi, doApi } from '@/api/do'
 import { checkApi } from '@/api/check'
 import { usersApi } from '@/api/users'
-import { actionApi } from '@/api/action'// Auth
+import { actionApi } from '@/api/action'
+import { authStorage } from '@/lib/authStorage'
+
+const C_PHASE_SYNC_INTERVAL_MS = 5000
+
+// Auth
 export const useCurrentUser = () =>
   useQuery({ queryKey: ['me'], queryFn: authApi.me, staleTime: 5 * 60 * 1000 })
 
@@ -64,10 +69,20 @@ export const useIndicatorCheckins = (indicator_id?: string) =>
   })
 
 export const useMyCoachingRequests = () =>
-  useQuery({ queryKey: ['coaching', 'my'], queryFn: doApi.myCoachingRequests })
+  useQuery({
+    queryKey: ['coaching', 'my'],
+    queryFn: doApi.myCoachingRequests,
+    refetchInterval: C_PHASE_SYNC_INTERVAL_MS,
+    refetchIntervalInBackground: false,
+  })
 
 export const useTeamCoachingRequests = () =>
-  useQuery({ queryKey: ['coaching', 'team'], queryFn: doApi.teamCoachingRequests })
+  useQuery({
+    queryKey: ['coaching', 'team'],
+    queryFn: doApi.teamCoachingRequests,
+    refetchInterval: C_PHASE_SYNC_INTERVAL_MS,
+    refetchIntervalInBackground: false,
+  })
 
 // C Phase
 export const useSelfAssessment = (goal_id?: string) =>
@@ -76,19 +91,28 @@ export const useSelfAssessment = (goal_id?: string) =>
     queryFn: () => checkApi.getSelfAssessment(goal_id!),
     enabled: !!goal_id,
     retry: false,
+    refetchInterval: C_PHASE_SYNC_INTERVAL_MS,
+    refetchIntervalInBackground: false,
   })
 
 export const useEvaluationTasks = () =>
   useQuery({ queryKey: ['eval-tasks'], queryFn: () => checkApi.listEvaluationTasks() })
 
 export const usePendingEvaluationTasks = () =>
-  useQuery({ queryKey: ['eval-tasks', 'pending'], queryFn: checkApi.pendingEvaluationTasks })
+  useQuery({
+    queryKey: ['eval-tasks', 'pending'],
+    queryFn: checkApi.pendingEvaluationTasks,
+    refetchInterval: C_PHASE_SYNC_INTERVAL_MS,
+    refetchIntervalInBackground: false,
+  })
 
 export const useGoalEvaluations = (goal_id?: string) =>
   useQuery({
     queryKey: ['evaluations', goal_id],
     queryFn: () => checkApi.getGoalEvaluations(goal_id!),
     enabled: !!goal_id,
+    refetchInterval: C_PHASE_SYNC_INTERVAL_MS,
+    refetchIntervalInBackground: false,
   })
 
 export const useFinalResult = (goal_id?: string) =>
@@ -97,6 +121,8 @@ export const useFinalResult = (goal_id?: string) =>
     queryFn: () => checkApi.getFinalResult(goal_id!),
     enabled: !!goal_id,
     retry: false,
+    refetchInterval: C_PHASE_SYNC_INTERVAL_MS,
+    refetchIntervalInBackground: false,
   })
 
 // A Phase
@@ -141,8 +167,7 @@ export const useLogout = () => {
   return useMutation({
     mutationFn: authApi.logout,
     onSuccess: () => {
-      localStorage.removeItem('access_token')
-      localStorage.removeItem('refresh_token')
+      authStorage.clearTokens()
       qc.clear()
       window.location.href = '/login'
     },

@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Body, Depends, Request
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -44,6 +44,7 @@ async def refresh(body: schemas.RefreshRequest, db: AsyncSession = Depends(get_d
 @router.post("/logout", response_model=schemas.MessageResponse)
 async def logout(
     request: Request,
+    body: schemas.LogoutRequest | None = Body(default=None),
     current_user=Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -60,7 +61,13 @@ async def logout(
         jti = ""
         exp = datetime.now(timezone.utc)
 
-    await service.logout(db=db, user=current_user, access_jti=jti, access_exp=exp)
+    await service.logout(
+        db=db,
+        user=current_user,
+        access_jti=jti,
+        access_exp=exp,
+        refresh_token_str=body.refresh_token if body else None,
+    )
     return {"message": "Successfully logged out"}
 
 

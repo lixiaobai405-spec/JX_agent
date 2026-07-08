@@ -15,7 +15,8 @@ async def create_self_assessment(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_active_user),
 ):
-    return await service.create_self_assessment(db, current_user, data.goal_id, data.items)
+    items = {key: value.model_dump() for key, value in data.items.items()}
+    return await service.create_self_assessment(db, current_user, data.goal_id, items)
 
 
 @router.get("/self-assessments/{assessment_id}", response_model=schemas.SelfAssessmentResponse)
@@ -34,7 +35,8 @@ async def update_self_assessment(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_active_user),
 ):
-    return await service.update_self_assessment(db, assessment_id, data.items)
+    items = {key: value.model_dump() for key, value in data.items.items()} if data.items is not None else None
+    return await service.update_self_assessment(db, assessment_id, items)
 
 
 @router.post("/self-assessments/{assessment_id}/submit", response_model=schemas.SelfAssessmentResponse)
@@ -137,5 +139,4 @@ async def adjust_final_result(
     current_user=Depends(get_current_active_user),
 ):
     return await service.adjust_final_result(db, result_id, data.final_grade, data.adjustment_reason, current_user)
-
 

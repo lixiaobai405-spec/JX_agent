@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { authApi } from '@/api/auth'
+import { authStorage } from '@/lib/authStorage'
 import { Loader2 } from 'lucide-react'
 
 const schema = z.object({
@@ -27,8 +28,7 @@ export function LoginPage() {
     setLoading(true)
     try {
       const data = await authApi.login(values.username, values.password)
-      localStorage.setItem('access_token', data.access_token)
-      localStorage.setItem('refresh_token', data.refresh_token)
+      authStorage.setTokens(data.access_token, data.refresh_token)
       navigate('/profile')
     } catch {
       // error toast handled by axios interceptor

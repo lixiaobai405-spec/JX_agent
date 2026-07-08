@@ -100,10 +100,13 @@ async def generate_diagnostic_report(db: AsyncSession, current_user: User, goal_
         actual_val = latest_checkin.actual_value.get("value", 0) if latest_checkin else 0
         actuals[ind.name] = actual_val
 
+        indicator_type = "redline" if ind.redline else ("positive" if ind.direction == "positive" else "negative")
+
         indicators_data.append({
             "name": ind.name,
-            "type": "positive" if ind.direction == "positive" else "negative",
+            "type": indicator_type,
             "target": ind.target_value or 0,
+            "target_display": str(ind.target_value or 0),
             "weight": ind.weight * 100,
             "is_redline": ind.redline
         })
@@ -115,9 +118,12 @@ async def generate_diagnostic_report(db: AsyncSession, current_user: User, goal_
             goal_id=goal_id,
             user_id=current_user.id,
             report_date=date.today(),
+            overall_progress=d_result["d_result"].get("overall_progress"),
             weighted_achievement_rate=d_result["d_result"]["weighted_achievement"],
+            time_progress=d_result["d_result"].get("time_progress"),
             progress_deviation=d_result["d_result"]["deviation"],
             indicators_analysis={"indicator_results": d_result["d_result"]["indicator_results"]},
+            root_cause_analysis={"content": d_result.get("feedback_text", "")},
             improvement_suggestions={"feedback": d_result.get("feedback_text", "")},
             traffic_light_status=d_result["d_result"]["overall_status"],
             generated_by_ai=True
@@ -212,6 +218,5 @@ async def list_team_requests(db: AsyncSession, current_user: User):
     query = select(CoachingRequest).where(CoachingRequest.manager_id == current_user.id).order_by(CoachingRequest.created_at.desc())
     result = await db.execute(query)
     return await _enrich_with_goal_id(db, list(result.scalars().all()))
-
 
 

@@ -59,5 +59,5 @@ export const actionApi = {
     client.post<InheritanceSuggestion>(`/action/inheritance-suggestions/${id}/accept`).then((r) => r.data),
 
   rejectSuggestion: (id: string, rejected_reason: string) =>
-    client.post<InheritanceSuggestion>(`/action/inheritance-suggestions/${id}/reject`, { rejected_reason }).then((r) => r.data),
+    client.post<InheritanceSuggestion>(`/action/inheritance-suggestions/${id}/reject`, { reason: rejected_reason }).then((r) => r.data),
 }

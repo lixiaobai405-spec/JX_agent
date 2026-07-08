@@ -1,11 +1,18 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Building2, BriefcaseBusiness, Plus, Trash2 } from 'lucide-react'
+import { Building2, BriefcaseBusiness, Pencil, Plus, Trash2 } from 'lucide-react'
 import { organizationsApi } from '@/api/organizations'
 import { usersApi } from '@/api/users'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -17,6 +24,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import type { Department } from '@/types'
 
 type ApiError = {
   response?: {
@@ -38,6 +46,11 @@ function emptyToUndefined(value: string) {
   return trimmed ? trimmed : undefined
 }
 
+function emptyToNull(value: string) {
+  const trimmed = value.trim()
+  return trimmed ? trimmed : null
+}
+
 function DepartmentPanel() {
   const qc = useQueryClient()
   const { data: departments = [] } = useQuery({
@@ -51,6 +64,13 @@ function DepartmentPanel() {
   const [form, setForm] = useState({
     name: '',
     code: '',
+    parent_id: '',
+    manager_id: '',
+    description: '',
+  })
+  const [editing, setEditing] = useState<Department | null>(null)
+  const [editForm, setEditForm] = useState({
+    name: '',
     parent_id: '',
     manager_id: '',
     description: '',
@@ -72,6 +92,26 @@ function DepartmentPanel() {
     onError: (error) => toast.error(getErrorMessage(error)),
   })
 
+  const updateDepartment = useMutation({
+    mutationFn: () => {
+      if (!editing) {
+        throw new Error('请选择要编辑的部门')
+      }
+      return organizationsApi.updateDepartment(editing.id, {
+        name: editForm.name.trim(),
+        parent_id: editForm.parent_id || null,
+        manager_id: editForm.manager_id || null,
+        description: emptyToNull(editForm.description),
+      })
+    },
+    onSuccess: () => {
+      toast.success('部门已更新')
+      setEditing(null)
+      qc.invalidateQueries({ queryKey: ['departments'] })
+    },
+    onError: (error) => toast.error(getErrorMessage(error)),
+  })
+
   const deleteDepartment = useMutation({
     mutationFn: organizationsApi.deleteDepartment,
     onSuccess: () => {
@@ -82,6 +122,18 @@ function DepartmentPanel() {
   })
 
   const canCreate = form.name.trim() && form.code.trim()
+  const canUpdate = editForm.name.trim()
+  const parentOptions = departments.filter((dept) => dept.id !== editing?.id)
+
+  function openEditDialog(dept: Department) {
+    setEditing(dept)
+    setEditForm({
+      name: dept.name,
+      parent_id: dept.parent_id ?? '',
+      manager_id: dept.manager_id ?? '',
+      description: dept.description ?? '',
+    })
+  }
 
   return (
     <div className="grid gap-4 lg:grid-cols-[360px_1fr]">
@@ -168,19 +220,30 @@ function DepartmentPanel() {
                   <TableCell>{dept.level}</TableCell>
                   <TableCell>{dept.manager_name ?? '—'}</TableCell>
                   <TableCell>{dept.member_count}</TableCell>
-                  <TableCell className="text-right">
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={() => {
-                        if (window.confirm(`确认删除部门「${dept.name}」？`)) {
-                          deleteDepartment.mutate(dept.id)
-                        }
-                      }}
-                      disabled={deleteDepartment.isPending}
-                    >
-                      <Trash2 className="size-3.5" />
-                    </Button>
+                  <TableCell>
+                    <div className="flex justify-end gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => openEditDialog(dept)}
+                        disabled={updateDepartment.isPending}
+                        aria-label={`编辑部门 ${dept.name}`}
+                      >
+                        <Pencil className="size-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => {
+                          if (window.confirm(`确认删除部门「${dept.name}」？`)) {
+                            deleteDepartment.mutate(dept.id)
+                          }
+                        }}
+                        disabled={deleteDepartment.isPending}
+                      >
+                        <Trash2 className="size-3.5" />
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
@@ -188,6 +251,68 @@ function DepartmentPanel() {
           </Table>
         </CardContent>
       </Card>
+      <Dialog open={Boolean(editing)} onOpenChange={(open) => {
+        if (!open) {
+          setEditing(null)
+        }
+      }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>编辑部门</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-3">
+            <div className="flex flex-col gap-1.5">
+              <Label>部门名称</Label>
+              <Input
+                value={editForm.name}
+                onChange={(e) => setEditForm((v) => ({ ...v, name: e.target.value }))}
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>父级部门</Label>
+              <select
+                value={editForm.parent_id}
+                onChange={(e) => setEditForm((v) => ({ ...v, parent_id: e.target.value }))}
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              >
+                <option value="">无</option>
+                {parentOptions.map((dept) => (
+                  <option key={dept.id} value={dept.id}>{dept.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>负责人</Label>
+              <select
+                value={editForm.manager_id}
+                onChange={(e) => setEditForm((v) => ({ ...v, manager_id: e.target.value }))}
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              >
+                <option value="">无</option>
+                {users.map((user) => (
+                  <option key={user.id} value={user.id}>{user.full_name} ({user.username})</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>说明</Label>
+              <Input
+                value={editForm.description}
+                onChange={(e) => setEditForm((v) => ({ ...v, description: e.target.value }))}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditing(null)}>取消</Button>
+            <Button
+              onClick={() => updateDepartment.mutate()}
+              disabled={!canUpdate || updateDepartment.isPending}
+            >
+              {updateDepartment.isPending ? '保存中...' : '保存'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

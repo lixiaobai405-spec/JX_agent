@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Sparkles, CheckCircle2, RefreshCw } from 'lucide-react'
 import { useCurrentUser, useCurrentPeriod, useCurrentGoal } from '@/hooks'
 import { planApi } from '@/api/do'
+import { normalizeAgreementTerm } from '@/lib/copy'
 import type { JobAnalysis, PerformanceContract } from '@/types'
 
 const PROTOTYPE_NAMES: Record<string, string> = {
@@ -89,7 +90,7 @@ function GenerateContractStep({ analysis, periodId, onDone }: {
   const [contract, setContract] = useState<PerformanceContract | null>(null)
   const { mutate, isPending } = useMutation({
     mutationFn: () => planApi.generateContract({ period_id: periodId, user_id: user!.id, job_analysis_id: analysis.id }),
-    onSuccess: (data) => { toast.success('合同生成完成'); setContract(data) },
+    onSuccess: (data) => { toast.success('合约生成完成'); setContract(data) },
   })
 
   const indicators = (contract?.contract_data as { indicators?: ContractIndicator[] } | undefined)?.indicators ?? []
@@ -104,7 +105,7 @@ function GenerateContractStep({ analysis, periodId, onDone }: {
               {indicators.map((ind, i) => (
                 <div key={i} className="flex items-center justify-between py-2 text-sm">
                   <div className="flex flex-col gap-0.5">
-                    <span>{ind.name}</span>
+                    <span>{normalizeAgreementTerm(ind.name)}</span>
                     {ind.target != null && <span className="text-xs text-muted-foreground">目标值：{ind.target}</span>}
                   </div>
                   <div className="flex items-center gap-2">
@@ -119,12 +120,12 @@ function GenerateContractStep({ analysis, periodId, onDone }: {
       )}
       <div className="flex items-center gap-2">
         <Button onClick={() => mutate()} disabled={isPending} variant={contract ? 'outline' : 'default'}>
-          {isPending ? <><RefreshCw data-icon="inline-start" className="animate-spin" />生成中...</> : contract ? <><RefreshCw data-icon="inline-start" />重新生成</> : <><Sparkles data-icon="inline-start" />AI 生成合同</>}
+          {isPending ? <><RefreshCw data-icon="inline-start" className="animate-spin" />生成中...</> : contract ? <><RefreshCw data-icon="inline-start" />重新生成</> : <><Sparkles data-icon="inline-start" />AI 生成合约</>}
         </Button>
         {contract && (
           <Button onClick={() => onDone(contract)}>
             <CheckCircle2 data-icon="inline-start" />
-            下一步：确认合同
+            下一步：确认合约
           </Button>
         )}
       </div>
@@ -139,8 +140,8 @@ function ConfirmContractStep({ contract, onConfirmed }: { contract: PerformanceC
   const { mutate, isPending } = useMutation({
     mutationFn: () => planApi.confirmContract(contract.id, user!.id),
     onSuccess: () => {
-      toast.success('合同已生效，目标正式创建')
-      qc.invalidateQueries({ queryKey: ['goal'] })
+      toast.success('合约已生效，目标正式创建')
+      qc.invalidateQueries({ queryKey: ['goal', (contract.contract_data as { period_id?: string }).period_id] })
       qc.invalidateQueries({ queryKey: ['periods', 'current'] })
       setOpen(false); onConfirmed()
     },
@@ -152,14 +153,14 @@ function ConfirmContractStep({ contract, onConfirmed }: { contract: PerformanceC
     <div className="flex flex-col gap-4">
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-base">合同指标总览（{PROTOTYPE_NAMES[contract.job_prototype_code] ?? contract.job_prototype_code}）</CardTitle>
+          <CardTitle className="text-base">合约指标总览（{PROTOTYPE_NAMES[contract.job_prototype_code] ?? contract.job_prototype_code}）</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="flex flex-col divide-y">
             {indicators.map((ind, i) => (
               <div key={i} className="flex items-center justify-between py-2.5 text-sm">
                 <div className="flex flex-col gap-0.5">
-                  <span className="font-medium">{ind.name}</span>
+                  <span className="font-medium">{normalizeAgreementTerm(ind.name)}</span>
                   {ind.target != null && <span className="text-xs text-muted-foreground">目标值：{ind.target}</span>}
                 </div>
                 <div className="flex items-center gap-2">
@@ -173,12 +174,12 @@ function ConfirmContractStep({ contract, onConfirmed }: { contract: PerformanceC
       </Card>
       <Button className="self-start" onClick={() => setOpen(true)}>
         <CheckCircle2 data-icon="inline-start" />
-        确认合同
+        确认合约
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
-          <DialogHeader><DialogTitle>确认绩效合同</DialogTitle></DialogHeader>
-          <p className="text-sm text-muted-foreground py-2">确认后合同正式生效，将自动创建目标和指标，无法撤销。</p>
+          <DialogHeader><DialogTitle>确认绩效合约</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground py-2">确认后合约正式生效，将自动创建目标和指标，无法撤销。</p>
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={() => setOpen(false)}>取消</Button>
             <Button onClick={() => mutate()} disabled={isPending}>
@@ -207,7 +208,7 @@ function StepIndicator({ current, total }: { current: number; total: number }) {
   )
 }
 
-const STEP_LABELS = ['岗位分析', '生成合同', '确认合同']
+const STEP_LABELS = ['岗位分析', '生成合约', '确认合约']
 
 export function PlanPage() {
   const [step, setStep] = useState(0)
@@ -222,7 +223,7 @@ export function PlanPage() {
     <div className="flex flex-col gap-6 max-w-2xl">
       <div>
         <h1 className="text-2xl font-semibold">P - 目标设定</h1>
-        <p className="text-sm text-muted-foreground mt-1">通过 AI 分析岗位职责，生成个性化绩效合同</p>
+        <p className="text-sm text-muted-foreground mt-1">通过 AI 分析岗位职责，生成个性化绩效合约</p>
       </div>
       {!period ? (
         <Card><CardContent className="py-10 text-center text-muted-foreground">暂无考核期，请联系经理创建</CardContent></Card>
@@ -231,7 +232,7 @@ export function PlanPage() {
           <CardContent className="flex items-center gap-3 py-6">
             <CheckCircle2 className="size-5 text-primary" />
             <div>
-              <p className="font-medium">绩效合同已生效</p>
+              <p className="font-medium">绩效合约已生效</p>
               <p className="text-sm text-muted-foreground">请前往「D - 执行追踪」开始打卡记录</p>
             </div>
           </CardContent>

@@ -20,6 +20,7 @@ import { usersApi } from '@/api/users'
 import { authApi } from '@/api/auth'
 import { TrafficLight } from '@/components/shared/TrafficLight'
 import { PhaseStatusBadge } from '@/components/shared/PhaseStatusBadge'
+import { formatDateTimeLocal } from '@/lib/datetime'
 
 function RoleBadge({ role }: { role: string }) {
   const MAP: Record<string, string> = {
@@ -275,8 +276,8 @@ export function ProfilePage() {
                 <InfoRow label="部门" value={user.department_name} />
                 <InfoRow label="岗位" value={user.position_name} />
                 <InfoRow label="上级" value={user.manager_name} />
-                <InfoRow label="状态" value={user.status === 'active' ? '在职' : '停用'} />
-                <InfoRow label="最后登录" value={user.last_login_at?.slice(0, 16).replace('T', ' ')} />
+                <InfoRow label="状态" value={user.status === 'inactive' ? '停用' : '在职'} />
+                <InfoRow label="最后登录" value={formatDateTimeLocal(user.last_login_at)} />
               </div>
               {isOwnProfile && (
                 <>

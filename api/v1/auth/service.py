@@ -154,20 +154,32 @@ async def refresh_tokens(db: AsyncSession, refresh_token_str: str) -> dict:
     }
 
 
-async def logout(db: AsyncSession, user: User, access_jti: str, access_exp: datetime) -> None:
+async def logout(
+    db: AsyncSession,
+    user: User,
+    access_jti: str,
+    access_exp: datetime,
+    refresh_token_str: str | None = None,
+) -> None:
     db.add(BlacklistedAccessToken(
         jti=access_jti,
         user_id=user.id,
         expires_at=access_exp,
     ))
-    # Revoke all refresh tokens for this user
-    result = await db.execute(
-        select(RefreshToken).where(
-            and_(RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None))
+    if refresh_token_str:
+        token_hash = hash_token(refresh_token_str)
+        result = await db.execute(
+            select(RefreshToken).where(
+                and_(
+                    RefreshToken.user_id == user.id,
+                    RefreshToken.token_hash == token_hash,
+                    RefreshToken.revoked_at.is_(None),
+                )
+            )
         )
-    )
-    for rt in result.scalars().all():
-        rt.revoked_at = datetime.now(timezone.utc)
+        token_row = result.scalar_one_or_none()
+        if token_row:
+            token_row.revoked_at = datetime.now(timezone.utc)
     await db.flush()
 
 

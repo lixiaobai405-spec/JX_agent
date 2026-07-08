@@ -13,6 +13,7 @@ class DepartmentCreate(BaseModel):
 
 class DepartmentUpdate(BaseModel):
     name: str | None = None
+    parent_id: str | None = None
     manager_id: str | None = None
     description: str | None = None
 

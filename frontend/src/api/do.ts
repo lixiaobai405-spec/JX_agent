@@ -1,9 +1,11 @@
 import client from './client'
+import { normalizeList } from '@/lib/api-normalizers'
+import { buildCoachingStatusUpdatePayload } from '@/lib/coaching'
 import type { Period, Goal, Indicator, DiagnosticReport, DataCheckin, CoachingRequest } from '@/types'
 
 export const periodsApi = {
-  list: () => client.get<{ items: Period[] }>('/periods/').then((r) => r.data.items),
-  listByStatus: (status: string) => client.get<{ items: Period[] }>('/periods/', { params: { status } }).then((r) => r.data.items),
+  list: () => client.get<{ items: Period[] | null }>('/periods/').then((r) => normalizeList<Period>(r.data.items)),
+  listByStatus: (status: string) => client.get<{ items: Period[] | null }>('/periods/', { params: { status } }).then((r) => normalizeList<Period>(r.data.items)),
   current: () => client.get<Period>('/periods/current').then((r) => r.data),
   create: (data: Partial<Period>) => client.post<Period>('/periods/', data).then((r) => r.data),
   updateStatus: (id: string, status: string) =>
@@ -66,5 +68,5 @@ export const doApi = {
     client.get<CoachingRequest[]>('/do/coaching-requests/my-team').then((r) => r.data),
 
   updateCoachingStatus: (id: string, status: string, notes?: string) =>
-    client.put(`/do/coaching-requests/${id}/status`, { status, notes }).then((r) => r.data),
+    client.put(`/do/coaching-requests/${id}/status`, buildCoachingStatusUpdatePayload(status, notes)).then((r) => r.data),
 }

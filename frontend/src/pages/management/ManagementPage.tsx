@@ -4,7 +4,7 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { toast } from 'sonner'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -25,6 +25,8 @@ import { periodsApi, doApi } from '@/api/do'
 import { checkApi } from '@/api/check'
 import { actionApi } from '@/api/action'
 import { usersApi } from '@/api/users'
+import { organizationsApi } from '@/api/organizations'
+import { isScoreInRange, parseScoreInput } from '@/lib/scores'
 import type { Period, CoachingRequest, Indicator, Goal } from '@/types'
 
 type ApiError = {
@@ -125,7 +127,7 @@ function CreatePeriodDialog({ userId, userName, open, onOpenChange }: {
         <form onSubmit={handleSubmit((d) => mutate(d))} className="flex flex-col gap-4 pt-2">
           <div className="flex flex-col gap-1.5">
             <Label>考核期名称</Label>
-            <Input {...register('name')} placeholder="如：2026-Q2" />
+            <Input {...register('name')} placeholder="如：2026年7月绩效周期" />
             {errors.name && <p className="text-xs text-destructive">{errors.name.message}</p>}
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -160,7 +162,10 @@ const userSchema = z.object({
   email: z.string().email('请填写有效邮箱'),
   password: z.string().min(6, '密码至少6位'),
   role: z.string().min(1),
+  department_id: z.string().optional(),
+  position_id: z.string().optional(),
   manager_id: z.string().optional(),
+  phone: z.string().optional(),
 })
 
 type UserForm = z.infer<typeof userSchema>
@@ -170,15 +175,36 @@ function CreateUserDialog({ open, onOpenChange }: {
 }) {
   const qc = useQueryClient()
   const { data: allUsers } = useAllUsers({})
+  const { data: departments = [] } = useQuery({
+    queryKey: ['departments'],
+    queryFn: organizationsApi.listDepartments,
+  })
+  const { data: positions = [] } = useQuery({
+    queryKey: ['positions'],
+    queryFn: organizationsApi.listPositions,
+  })
   const { register, handleSubmit, reset, formState: { errors } } = useForm<UserForm>({
     resolver: zodResolver(userSchema),
-    defaultValues: { role: 'employee', manager_id: '' },
+    defaultValues: {
+      role: 'employee',
+      department_id: '',
+      position_id: '',
+      manager_id: '',
+      phone: '',
+    },
   })
 
   const { mutate, isPending } = useMutation({
     mutationFn: (data: UserForm) => usersApi.create({
-      ...data,
+      username: data.username,
+      full_name: data.full_name,
+      email: data.email,
+      password: data.password,
+      role: data.role,
+      department_id: emptyToUndefined(data.department_id),
+      position_id: emptyToUndefined(data.position_id),
       manager_id: emptyToUndefined(data.manager_id),
+      phone: emptyToUndefined(data.phone),
     }),
     onSuccess: () => {
       toast.success('用户创建成功')
@@ -193,7 +219,7 @@ function CreateUserDialog({ open, onOpenChange }: {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>创建新用户</DialogTitle>
         </DialogHeader>
@@ -227,6 +253,26 @@ function CreateUserDialog({ open, onOpenChange }: {
               <option value="system_admin">系统管理员</option>
             </select>
           </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="flex flex-col gap-1.5">
+              <Label>所属部门（可选）</Label>
+              <select {...register('department_id')} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
+                <option value="">未指定</option>
+                {departments.map((dept) => (
+                  <option key={dept.id} value={dept.id}>{dept.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>岗位（可选）</Label>
+              <select {...register('position_id')} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
+                <option value="">未指定</option>
+                {positions.map((position) => (
+                  <option key={position.id} value={position.id}>{position.name}</option>
+                ))}
+              </select>
+            </div>
+          </div>
           <div className="flex flex-col gap-1.5">
             <Label>直属上级（可选）</Label>
             <select {...register('manager_id')} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
@@ -235,6 +281,10 @@ function CreateUserDialog({ open, onOpenChange }: {
                 <option key={u.id} value={u.id}>{u.full_name} ({u.username})</option>
               ))}
             </select>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label>手机号（可选）</Label>
+            <Input {...register('phone')} placeholder="手机号" />
           </div>
           <div className="flex justify-end gap-2 pt-1">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>取消</Button>
@@ -397,8 +447,8 @@ function EvalScoringSection({ goal, indicators: allIndicators }: { goal: Goal; i
       const toSubmit = indicators.filter(ind => taskByIndicator[ind.id] && !evalByIndicator[ind.id])
       for (const ind of toSubmit) {
         const inp = inputs[ind.id]
-        const score = parseFloat(inp?.score ?? '')
-        if (isNaN(score)) throw new Error(`请为指标「${ind.name}」填写分数`)
+        if (!isScoreInRange(inp?.score ?? '')) throw new Error(`请为指标「${ind.name}」填写 0-100 之间的分数`)
+        const score = Number(inp.score)
         await checkApi.submitEvaluation({
           task_id: taskByIndicator[ind.id],
           indicator_id: ind.id,
@@ -489,10 +539,10 @@ function EvalScoringSection({ goal, indicators: allIndicators }: { goal: Goal; i
                           type="number"
                           min={0}
                           max={100}
-                          className="w-20 h-7 text-sm"
-                          placeholder="0-100"
+                          className="h-7 w-36 shrink-0 text-sm"
+                          placeholder="分数 (0-100)"
                           value={inputs[ind.id]?.score ?? ''}
-                          onChange={e => setInput(ind.id, 'score', e.target.value)}
+                          onChange={e => setInput(ind.id, 'score', parseScoreInput(e.target.value))}
                         />
                         <Input
                           className="h-7 text-sm"

@@ -47,6 +47,39 @@ npm run dev
 
 课堂演示如果没有可用 API Key，可在 `.env` 中设置 `USE_MOCK=true`，后端仍使用同一条启动命令。
 
+### Mock 演示数据
+
+首次演示前先初始化本地 demo 数据：
+
+```powershell
+$env:USE_MOCK='true'
+uv run python scripts/seed_demo_data.py
+uv run python scripts/verify_demo_data.py
+```
+
+本地演示账号：
+
+| username | password | role | use |
+|---|---|---|---|
+| `demo_sales` | `Demo@123456` | employee | 员工 PDCA 主流程 |
+| `demo_manager` | `Demo@123456` | manager | 经理评分、辅导和审批 |
+| `demo_ceo` | `Demo@123456` | system_admin | 管理员/高管兜底 |
+| `demo_rd` | `Demo@123456` | employee | P 类项目型验收 |
+| `demo_ops` | `Demo@123456` | employee | O 类运营型验收 |
+| `demo_recruiter` | `Demo@123456` | employee | F 类职能型验收 |
+| `demo_supply` | `Demo@123456` | manager | M 类管理型验收 |
+
+完整后端验证：
+
+```powershell
+$env:USE_MOCK='true'
+uv run python scripts/verify_mock_llm_cases.py
+uv run python scripts/verify_p_stage_contract.py
+uv run python scripts/verify_d_stage_demo.py
+uv run python scripts/verify_c_stage_demo.py
+uv run python scripts/verify_a_stage_demo.py
+```
+
 ---
 
 ## Docker 快速部署

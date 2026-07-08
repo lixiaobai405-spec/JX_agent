@@ -176,6 +176,62 @@ Windows 一键启动：
 USE_MOCK=true uv run python -m uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
+## 本地 Mock 演示
+
+这些账号仅用于本地演示和验收，不要用于生产环境：
+
+| username | password | role | use |
+|---|---|---|---|
+| `demo_sales` | `Demo@123456` | employee | 员工 PDCA 主流程 |
+| `demo_manager` | `Demo@123456` | manager | 经理评分、辅导和审批 |
+| `demo_ceo` | `Demo@123456` | system_admin | 管理员/高管兜底 |
+| `demo_rd` | `Demo@123456` | employee | P 类项目型验收 |
+| `demo_ops` | `Demo@123456` | employee | O 类运营型验收 |
+| `demo_recruiter` | `Demo@123456` | employee | F 类职能型验收 |
+| `demo_supply` | `Demo@123456` | manager | M 类管理型验收 |
+
+PowerShell 启动命令：
+
+```powershell
+$env:USE_MOCK='true'
+uv run python scripts/seed_demo_data.py
+uv run python scripts/verify_demo_data.py
+uv run python -m uvicorn main:app --host 0.0.0.0 --port 8000
+```
+
+另开一个 PowerShell 终端启动前端：
+
+```powershell
+cd frontend
+npm run dev
+```
+
+访问：
+
+- 前端：`http://localhost:5173`
+- API 文档：`http://localhost:8000/docs`
+
+S 类销售岗现场演示脚本：
+
+1. 登录 `demo_sales`，打开个人主页确认岗位是“华东KA销售经理”。
+2. 打开 P 阶段，粘贴华东 KA 销售 JD，分析岗位、生成合约并确认。
+3. 打开 D 阶段，提交指标打卡，生成诊断报告并申请辅导。
+4. 登录 `demo_manager`，处理辅导请求，进入 C 阶段生成评估任务并完成评分。
+5. 生成最终结果，员工确认结果。
+6. 登录 `demo_sales`，打开 A 阶段生成复盘报告，创建 IDP，进行 AI SMART 审核。
+7. 登录 `demo_manager`，审批 IDP。
+8. 回到 `demo_sales`，生成下期继承建议。
+
+五类岗位验收口径：
+
+| code | 验收点 |
+|---|---|
+| S | 分类为 S，5 个指标，非红线定量权重 85%，月度周期 |
+| P | 分类为 P，7 个指标，定性权重 45%，季度周期 |
+| O | 分类为 O，5 个指标，生产/SOP/质量数据驱动，月度周期 |
+| F | 分类为 F，7 个指标，满意度/合规/响应效率，月度周期 |
+| M | 分类为 M，6 个指标，战略分解/团队赋能/长周期，半年度周期 |
+
 ## 文档
 
 - 产品功能蓝图：[docs/blueprint.md](docs/blueprint.md)

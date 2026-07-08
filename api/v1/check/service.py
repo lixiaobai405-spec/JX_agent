@@ -15,12 +15,29 @@ from core.exceptions import (
 )
 
 
+def validate_score_value(score: float) -> float:
+    if score < 0 or score > 100:
+        raise ValueError("评分必须在 0-100 之间")
+    return score
+
+
+def validate_score_items(items: dict | None) -> dict | None:
+    if items is None:
+        return None
+    for item in items.values():
+        score = item.get("score") if isinstance(item, dict) else None
+        if score is None:
+            raise ValueError("评分不能为空")
+        validate_score_value(float(score))
+    return items
+
+
 # Self Assessment
 async def create_self_assessment(db: AsyncSession, current_user: User, goal_id: str, items: dict):
     assessment = SelfAssessment(
         goal_id=goal_id,
         user_id=current_user.id,
-        items=items,
+        items=validate_score_items(items),
         status="draft"
     )
     db.add(assessment)
@@ -41,7 +58,7 @@ async def update_self_assessment(db: AsyncSession, assessment_id: str, items: di
     if assessment.status != "draft":
         raise SelfAssessmentAlreadySubmittedError()
     if items is not None:
-        assessment.items = items
+        assessment.items = validate_score_items(items)
     await db.commit()
     await db.refresh(assessment)
     return assessment
@@ -124,6 +141,22 @@ async def generate_evaluation_tasks(db: AsyncSession, current_user: User, goal_i
 
     tasks_created = []
     for indicator in indicators:
+        existing_result = await db.execute(
+            select(EvaluationTask).where(
+                EvaluationTask.goal_id == goal_id,
+                EvaluationTask.indicator_id == indicator.id,
+                EvaluationTask.evaluator_user_id == evaluator_id,
+                EvaluationTask.deleted_at.is_(None),
+            ).order_by(EvaluationTask.created_at.asc())
+        )
+        existing_tasks = list(existing_result.scalars().all())
+        if existing_tasks:
+            task = existing_tasks[0]
+            for duplicate in existing_tasks[1:]:
+                duplicate.deleted_at = datetime.now(timezone.utc)
+            tasks_created.append(task)
+            continue
+
         task = EvaluationTask(
             goal_id=goal_id,
             indicator_id=indicator.id,
@@ -146,6 +179,7 @@ async def generate_evaluation_tasks(db: AsyncSession, current_user: User, goal_i
 # Evaluations
 async def submit_evaluation(db: AsyncSession, current_user: User, task_id: str, indicator_id: str, score: float, comment: str | None = None):
     task = await get_evaluation_task(db, task_id)
+    score = validate_score_value(score)
 
     query = select(SelfAssessment).where(SelfAssessment.goal_id == task.goal_id)
     result = await db.execute(query)
@@ -230,27 +264,55 @@ async def generate_final_result(db: AsyncSession, current_user: User, goal_id: s
         "monthly"
     )
 
-    score_agg = ScoreAggregate(
-        goal_id=goal_id,
-        final_score=c_result["total_score"],
-        breakdown=c_result,
-        computed_at=datetime.now(timezone.utc)
+    score_agg_result = await db.execute(
+        select(ScoreAggregate).where(
+            ScoreAggregate.goal_id == goal_id,
+            ScoreAggregate.deleted_at.is_(None),
+        )
     )
-    db.add(score_agg)
-    await db.flush()
+    score_agg = score_agg_result.scalar_one_or_none()
+    if score_agg:
+        score_agg.final_score = c_result["total_score"]
+        score_agg.breakdown = c_result
+        score_agg.computed_at = datetime.now(timezone.utc)
+    else:
+        score_agg = ScoreAggregate(
+            goal_id=goal_id,
+            final_score=c_result["total_score"],
+            breakdown=c_result,
+            computed_at=datetime.now(timezone.utc)
+        )
+        db.add(score_agg)
+        await db.flush()
 
     suggested_grade = c_result.get("grade", "C")
 
-    final_result = FinalResult(
-        goal_id=goal_id,
-        computed_score_id=score_agg.id,
-        suggested_grade=suggested_grade,
-        final_grade=suggested_grade,
-        confirmed_by=current_user.id,
-        confirmed_at=datetime.now(timezone.utc),
-        status="pending"
+    final_result_result = await db.execute(
+        select(FinalResult).where(
+            FinalResult.goal_id == goal_id,
+            FinalResult.deleted_at.is_(None),
+        )
     )
-    db.add(final_result)
+    final_result = final_result_result.scalar_one_or_none()
+    if final_result:
+        final_result.computed_score_id = score_agg.id
+        final_result.suggested_grade = suggested_grade
+        final_result.final_grade = suggested_grade
+        final_result.confirmed_by = current_user.id
+        final_result.confirmed_at = datetime.now(timezone.utc)
+        if final_result.status != "confirmed":
+            final_result.status = "pending"
+    else:
+        final_result = FinalResult(
+            goal_id=goal_id,
+            computed_score_id=score_agg.id,
+            suggested_grade=suggested_grade,
+            final_grade=suggested_grade,
+            confirmed_by=current_user.id,
+            confirmed_at=datetime.now(timezone.utc),
+            status="pending"
+        )
+        db.add(final_result)
     await db.commit()
     await db.refresh(final_result)
     return final_result
@@ -286,5 +348,3 @@ async def adjust_final_result(db: AsyncSession, result_id: str, final_grade: str
     await db.commit()
     await db.refresh(final_result)
     return final_result
-
-

@@ -124,6 +124,12 @@ class DepartmentHasMembersError(AppException):
                          "Cannot delete department with members")
 
 
+class DepartmentParentInvalidError(AppException):
+    def __init__(self):
+        super().__init__(HTTP_400_BAD_REQUEST, "ORG_008",
+                         "Cannot set department parent to itself or its descendant")
+
+
 class PositionNotFoundError(AppException):
     def __init__(self):
         super().__init__(HTTP_404_NOT_FOUND, "ORG_005", "Position not found")

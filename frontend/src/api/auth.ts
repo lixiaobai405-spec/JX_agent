@@ -1,4 +1,5 @@
 import client from './client'
+import { authStorage } from '@/lib/authStorage'
 import type { LoginResponse, User, SessionInfo } from '@/types'
 
 export const authApi = {
@@ -11,7 +12,7 @@ export const authApi = {
     }).then((r) => r.data)
   },
 
-  logout: () => client.post('/auth/logout'),
+  logout: () => client.post('/auth/logout', { refresh_token: authStorage.getRefreshToken() }),
 
   me: () => client.get<User>('/auth/me').then((r) => r.data),
 

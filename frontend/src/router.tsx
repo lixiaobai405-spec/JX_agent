@@ -9,9 +9,10 @@ import { CheckPage } from '@/pages/pdca/check/CheckPage'
 import { ActionPage } from '@/pages/pdca/action/ActionPage'
 import { AdminOrgPage } from '@/pages/admin/AdminOrgPage'
 import { AdminPeriodsPage } from '@/pages/admin/AdminPeriodsPage'
+import { authStorage } from '@/lib/authStorage'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
-  const token = localStorage.getItem('access_token')
+  const token = authStorage.getAccessToken()
   if (!token) return <Navigate to="/login" replace />
   return <>{children}</>
 }

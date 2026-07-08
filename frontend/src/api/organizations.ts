@@ -13,6 +13,13 @@ export const organizationsApi = {
     description?: string
   }) => client.post<Department>('/organizations/departments', data).then((r) => r.data),
 
+  updateDepartment: (id: string, data: {
+    name?: string
+    parent_id?: string | null
+    manager_id?: string | null
+    description?: string | null
+  }) => client.put<Department>(`/organizations/departments/${id}`, data).then((r) => r.data),
+
   deleteDepartment: (id: string) =>
     client.delete(`/organizations/departments/${id}`).then((r) => r.data),
 

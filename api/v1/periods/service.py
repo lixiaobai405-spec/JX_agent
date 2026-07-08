@@ -10,8 +10,8 @@ from models.user import User, UserRole
 STATUS_FLOW = {
     PeriodStatus.draft: [PeriodStatus.open],
     PeriodStatus.open: [PeriodStatus.closed],
-    PeriodStatus.closed: [PeriodStatus.archived],
-    PeriodStatus.archived: []
+    PeriodStatus.closed: [PeriodStatus.open, PeriodStatus.archived],
+    PeriodStatus.archived: [PeriodStatus.closed],
 }
 
 
@@ -57,6 +57,8 @@ async def list_periods(
 
     if status:
         query = query.where(Period.status == status)
+    else:
+        query = query.where(Period.status != PeriodStatus.archived)
 
     # 根据角色过滤周期
     if current_user.role == UserRole.employee:
@@ -129,16 +131,17 @@ async def update_period(db: AsyncSession, current_user: User, period_id: str, da
 async def update_period_status(db: AsyncSession, current_user: User, period_id: str, new_status: PeriodStatus) -> Period:
     from core.exceptions import PermissionDeniedError, PeriodStatusTransitionError, PeriodDateConflictError
 
-    if current_user.role not in (UserRole.manager, UserRole.hr_admin, UserRole.system_admin):
-        raise PermissionDeniedError("Only managers and admins can change period status")
+    if current_user.role not in (UserRole.manager, UserRole.system_admin):
+        raise PermissionDeniedError("Only managers and system admins can change period status")
 
     period = await get_period(db, period_id)
 
-    # Managers can only close periods belonging to their subordinates
+    # Managers can only change periods belonging to themselves or their subordinates.
     if current_user.role == UserRole.manager:
         subordinate_ids = await _get_subordinate_ids(db, current_user.id)
-        if period.user_id not in subordinate_ids:
-            raise PermissionDeniedError("Managers can only close periods for their subordinates")
+        allowed_ids = subordinate_ids + [current_user.id]
+        if period.user_id not in allowed_ids:
+            raise PermissionDeniedError("Managers can only change periods for themselves or their subordinates")
 
     if new_status not in STATUS_FLOW.get(period.status, []):
         raise PeriodStatusTransitionError(f"Cannot transition from {period.status.value} to {new_status.value}")
@@ -191,4 +194,3 @@ async def delete_period(db: AsyncSession, current_user: User, period_id: str) ->
 
     period.deleted_at = datetime.now(timezone.utc)
     await db.commit()
-

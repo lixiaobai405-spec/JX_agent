@@ -8,6 +8,7 @@ from core.exceptions import (
     DepartmentHasChildrenError,
     DepartmentHasMembersError,
     DepartmentNotFoundError,
+    DepartmentParentInvalidError,
     PositionCodeExistsError,
     PositionHasMembersError,
     PositionNotFoundError,
@@ -40,6 +41,35 @@ async def _dept_to_dict(db: AsyncSession, dept: Department) -> dict:
         "description": dept.description, "member_count": count,
         "created_at": dept.created_at,
     }
+
+
+async def _get_descendant_department_ids(db: AsyncSession, dept_id: str) -> set[str]:
+    descendant_ids: set[str] = set()
+    queue = [dept_id]
+    while queue:
+        parent_id = queue.pop(0)
+        result = await db.execute(
+            select(Department.id).where(
+                and_(Department.parent_id == parent_id, Department.deleted_at.is_(None))
+            )
+        )
+        child_ids = result.scalars().all()
+        descendant_ids.update(child_ids)
+        queue.extend(child_ids)
+    return descendant_ids
+
+
+async def _recalculate_department_tree(db: AsyncSession, parent: Department) -> None:
+    result = await db.execute(
+        select(Department).where(
+            and_(Department.parent_id == parent.id, Department.deleted_at.is_(None))
+        )
+    )
+    children = result.scalars().all()
+    for child in children:
+        child.level = parent.level + 1
+        child.path = parent.path + parent.id + "/"
+        await _recalculate_department_tree(db, child)
 
 
 async def list_departments(
@@ -93,8 +123,31 @@ async def update_department(db: AsyncSession, dept_id: str, data: dict) -> dict:
     dept = await db.get(Department, dept_id)
     if not dept or dept.deleted_at:
         raise DepartmentNotFoundError()
-    for field in ("name", "manager_id", "description"):
-        if field in data and data[field] is not None:
+
+    if "parent_id" in data:
+        parent_id = data["parent_id"]
+        if parent_id == dept.id:
+            raise DepartmentParentInvalidError()
+        if parent_id is None:
+            dept.parent_id = None
+            dept.level = 1
+            dept.path = "/"
+        else:
+            parent = await db.get(Department, parent_id)
+            if not parent or parent.deleted_at:
+                raise DepartmentNotFoundError()
+            descendants = await _get_descendant_department_ids(db, dept.id)
+            if parent_id in descendants:
+                raise DepartmentParentInvalidError()
+            dept.parent_id = parent_id
+            dept.level = parent.level + 1
+            dept.path = parent.path + parent.id + "/"
+        await _recalculate_department_tree(db, dept)
+
+    if "name" in data and data["name"] is not None:
+        dept.name = data["name"]
+    for field in ("manager_id", "description"):
+        if field in data:
             setattr(dept, field, data[field])
     await db.flush()
     return await _dept_to_dict(db, dept)

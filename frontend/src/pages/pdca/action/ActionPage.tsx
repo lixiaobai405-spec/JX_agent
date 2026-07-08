@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Sparkles, RefreshCw, CheckCircle2, ThumbsUp, ThumbsDown, Clock } from 'lucide-react'
 import {
   useCurrentUser, useCurrentPeriod, useCurrentGoal, useFinalResult,
-  useMyPlans, useReviewReportByUser, useInheritanceSuggestions,
+  useMyPlans, useReviewReportByUser, useInheritanceSuggestions, usePeriods, useTeamPlans,
 } from '@/hooks'
 import { actionApi } from '@/api/action'
 import { AILoadingSkeleton } from '@/components/shared/AILoadingSkeleton'
@@ -30,6 +30,7 @@ type PlanAiSuggestions = {
 export function ActionPage() {
   const { data: user } = useCurrentUser()
   const { data: period } = useCurrentPeriod()
+  const { data: periods } = usePeriods()
   const { data: goal } = useCurrentGoal(period?.id)
   const { data: finalResult } = useFinalResult(goal?.id)
   const qc = useQueryClient()
@@ -37,11 +38,21 @@ export function ActionPage() {
   // Persistent loading — survives navigation/refresh
   const { data: report, isLoading: reportLoading } = useReviewReportByUser(user?.id, period?.id)
   const { data: plans } = useMyPlans()
+  const { data: teamPlans } = useTeamPlans()
   const plan = plans?.find((p) => p.review_report_id === report?.id)
+  const isManager = user?.role === 'manager' || user?.role === 'hr_admin' || user?.role === 'system_admin'
+  const nextPeriod = periods
+    ?.filter((item) =>
+      item.user_id === user?.id &&
+      period &&
+      new Date(item.start_date).getTime() > new Date(period.start_date).getTime()
+    )
+    .sort((a, b) => new Date(a.start_date).getTime() - new Date(b.start_date).getTime())[0]
   const { data: suggestions } = useInheritanceSuggestions(
-    plan?.status === 'approved' ? user?.id : undefined,
-    plan?.status === 'approved' ? period?.id : undefined,
+    plan?.status === 'approved' && nextPeriod ? user?.id : undefined,
+    plan?.status === 'approved' && nextPeriod ? nextPeriod.id : undefined,
   )
+  const pendingTeamPlans = isManager ? teamPlans?.filter((item) => item.status === 'reviewed') : []
 
   const [feedback, setFeedback] = useState('')
   const [planGoals, setPlanGoals] = useState('')
@@ -109,14 +120,33 @@ export function ActionPage() {
     onSuccess: () => {
       toast.success('IDP 已提交给经理审批')
       qc.invalidateQueries({ queryKey: ['my-plans'] })
+      qc.invalidateQueries({ queryKey: ['team-plans'] })
     },
   })
 
   const { mutate: genSuggestions, isPending: suggPending } = useMutation({
-    mutationFn: () => actionApi.generateInheritanceSuggestions(user!.id, period!.id, period!.id),
+    mutationFn: () => actionApi.generateInheritanceSuggestions(user!.id, period!.id, nextPeriod!.id),
     onSuccess: () => {
       toast.success('继承建议已生成')
-      qc.invalidateQueries({ queryKey: ['inheritance-suggestions', user?.id, period?.id] })
+      qc.invalidateQueries({ queryKey: ['inheritance-suggestions', user?.id, nextPeriod?.id] })
+    },
+  })
+
+  const { mutate: approveTeamPlan } = useMutation({
+    mutationFn: (id: string) => actionApi.approvePlan(id, true),
+    onSuccess: () => {
+      toast.success('IDP 已通过审批')
+      qc.invalidateQueries({ queryKey: ['team-plans'] })
+      qc.invalidateQueries({ queryKey: ['my-plans'] })
+    },
+  })
+
+  const { mutate: rejectTeamPlan } = useMutation({
+    mutationFn: (id: string) => actionApi.approvePlan(id, false, '请补充更具体的行动里程碑后重新提交'),
+    onSuccess: () => {
+      toast.success('已退回修改')
+      qc.invalidateQueries({ queryKey: ['team-plans'] })
+      qc.invalidateQueries({ queryKey: ['my-plans'] })
     },
   })
 
@@ -124,7 +154,7 @@ export function ActionPage() {
     mutationFn: (id: string) => actionApi.acceptSuggestion(id),
     onSuccess: () => {
       toast.success('已采纳')
-      qc.invalidateQueries({ queryKey: ['inheritance-suggestions', user?.id, period?.id] })
+      qc.invalidateQueries({ queryKey: ['inheritance-suggestions', user?.id, nextPeriod?.id] })
     },
   })
 
@@ -132,7 +162,7 @@ export function ActionPage() {
     mutationFn: ({ id, reason }: { id: string; reason: string }) => actionApi.rejectSuggestion(id, reason),
     onSuccess: () => {
       toast.success('已拒绝')
-      qc.invalidateQueries({ queryKey: ['inheritance-suggestions', user?.id, period?.id] })
+      qc.invalidateQueries({ queryKey: ['inheritance-suggestions', user?.id, nextPeriod?.id] })
       setRejectId(null)
     },
   })
@@ -156,6 +186,29 @@ export function ActionPage() {
         <h1 className="text-2xl font-semibold">A - 复盘发展</h1>
         <p className="text-sm text-muted-foreground mt-1">{period?.name}</p>
       </div>
+
+      {isManager && (pendingTeamPlans?.length ?? 0) > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">待审批发展计划</CardTitle>
+            <CardDescription>处理团队成员提交的 IDP</CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            {pendingTeamPlans!.map((item) => (
+              <div key={item.id} className="flex items-start justify-between gap-3 rounded-md border p-3">
+                <div className="min-w-0 flex-1 text-sm">
+                  <p className="font-medium truncate">{(item.goals as { text?: string }).text ?? '发展目标'}</p>
+                  <p className="mt-1 text-muted-foreground line-clamp-2">{(item.actions as { text?: string }).text ?? '行动计划'}</p>
+                </div>
+                <div className="flex shrink-0 gap-2">
+                  <Button size="sm" variant="outline" onClick={() => rejectTeamPlan(item.id)}>退回</Button>
+                  <Button size="sm" onClick={() => approveTeamPlan(item.id)}>通过</Button>
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       {/* ① 复盘报告 */}
       <Card>
@@ -358,11 +411,14 @@ export function ActionPage() {
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
             {!suggestions?.length ? (
-              <Button variant="outline" className="self-start" onClick={() => genSuggestions()} disabled={suggPending}>
-                {suggPending
-                  ? <><RefreshCw data-icon="inline-start" className="animate-spin" />生成中...</>
-                  : <><Sparkles data-icon="inline-start" />生成继承建议</>}
-              </Button>
+              <div className="flex flex-col gap-2">
+                {!nextPeriod && <p className="text-sm text-muted-foreground">暂无下期周期，请先创建下期考核期后再生成继承建议</p>}
+                <Button variant="outline" className="self-start" onClick={() => genSuggestions()} disabled={suggPending || !nextPeriod}>
+                  {suggPending
+                    ? <><RefreshCw data-icon="inline-start" className="animate-spin" />生成中...</>
+                    : <><Sparkles data-icon="inline-start" />生成继承建议</>}
+                </Button>
+              </div>
             ) : (
               <div className="flex flex-col gap-3">
                 {suggestions.map((sugg) => (

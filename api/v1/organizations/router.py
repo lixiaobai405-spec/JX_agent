@@ -45,7 +45,7 @@ async def update_department(
     dept_id: str, body: schemas.DepartmentUpdate,
     _=_write_auth, db: AsyncSession = Depends(get_db),
 ):
-    return await service.update_department(db=db, dept_id=dept_id, data=body.model_dump(exclude_none=True))
+    return await service.update_department(db=db, dept_id=dept_id, data=body.model_dump(exclude_unset=True))
 
 
 @router.delete("/departments/{dept_id}")

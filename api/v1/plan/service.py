@@ -116,15 +116,42 @@ async def delete_prototype(db: AsyncSession, current_user: User, prototype_id: s
     await db.commit()
 
 
+def _is_redline_indicator(ind_data: dict) -> bool:
+    return bool(ind_data.get("is_redline")) or ind_data.get("type") == "redline"
+
+
+def _indicator_direction(ind_data: dict):
+    from models.check_phase import IndicatorDirection
+
+    if ind_data.get("type") in ("negative", "redline"):
+        return IndicatorDirection.negative
+    return IndicatorDirection.positive
+
+
+def _indicator_definition(ind_data: dict) -> str:
+    definition = ind_data.get("definition") or ""
+    details = []
+    if ind_data.get("target_display"):
+        details.append(f"目标：{ind_data['target_display']}")
+    if ind_data.get("scoring_rule"):
+        details.append(f"评分：{ind_data['scoring_rule']}")
+    if not details:
+        return definition
+    suffix = "；".join(details)
+    if suffix in definition:
+        return definition
+    return f"{definition}；{suffix}" if definition else suffix
+
+
 def validate_contract_indicators(contract_data: dict, prototype: JobPrototype) -> None:
     from core.exceptions import IndicatorWeightError, ContractGenerationFailedError
 
     indicators = contract_data.get('indicators', [])
-    regular = [i for i in indicators if i.get('is_special') == 'none']
+    regular = [i for i in indicators if not _is_redline_indicator(i)]
 
     total_weight = sum(i.get('weight', 0) for i in regular)
-    if abs(total_weight - 1.0) > 0.001:
-        raise IndicatorWeightError(f"Weight sum is {total_weight}, must be 1.0")
+    if abs(total_weight - 100) > 0.001:
+        raise IndicatorWeightError(f"Weight sum is {total_weight}, must be 100")
 
     count = len(indicators)
     if not (prototype.indicator_count_min <= count <= prototype.indicator_count_max):
@@ -132,8 +159,12 @@ def validate_contract_indicators(contract_data: dict, prototype: JobPrototype) -
             f"Indicator count {count} outside range [{prototype.indicator_count_min}, {prototype.indicator_count_max}]"
         )
 
-    quantitative = [i for i in regular if i.get('indicator_attribute') == 'quantitative']
-    ratio = len(quantitative) / len(regular) if regular else 0
+    quantitative_weight = sum(
+        i.get('weight', 0)
+        for i in regular
+        if i.get('type') in ('positive', 'negative')
+    )
+    ratio = quantitative_weight / total_weight if total_weight else 0
     if not (prototype.quantitative_ratio_min <= ratio <= prototype.quantitative_ratio_max):
         raise ContractGenerationFailedError(
             f"Quantitative ratio {ratio:.2f} outside range [{prototype.quantitative_ratio_min}, {prototype.quantitative_ratio_max}]"
@@ -162,6 +193,8 @@ async def generate_contract(db: AsyncSession, current_user: User, period_id: str
             "coaching_period": p_result.coaching_period,
             "result_application": p_result.result_application
         }
+        prototype = await get_prototype(db, analysis.job_prototype_code)
+        validate_contract_indicators(contract_data, prototype)
 
         contract = PerformanceContract(
             goal_id=None,
@@ -219,12 +252,12 @@ async def confirm_contract(db: AsyncSession, current_user: User, contract_id: st
         indicator = Indicator(
             goal_id=goal.id,
             name=ind_data.get("name"),
-            definition=ind_data.get("definition"),
-            direction=IndicatorDirection.positive if ind_data.get("type") == "positive" else IndicatorDirection.negative,
+            definition=_indicator_definition(ind_data),
+            direction=_indicator_direction(ind_data),
             weight=ind_data.get("weight", 0) / 100.0,
             target_value=ind_data.get("target"),
             score_method=ScoreMethod.ratio,
-            redline=ind_data.get("is_redline", False)
+            redline=_is_redline_indicator(ind_data)
         )
         db.add(indicator)
 
