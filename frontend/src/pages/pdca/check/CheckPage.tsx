@@ -11,16 +11,35 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { CheckCircle2, RefreshCw } from 'lucide-react'
 import {
   useCurrentUser, useCurrentPeriod, useCurrentGoal, useIndicators,
-  useSelfAssessment, usePendingEvaluationTasks, useFinalResult, useGoalEvaluations,
+  useSelfAssessment, usePendingEvaluationTasks, useFinalResult, useGoalEvaluations, useLatestDiagnostic,
 } from '@/hooks'
 import { checkApi } from '@/api/check'
 import { hasInvalidScores, parseScoreInput, toScorePayload } from '@/lib/scores'
+import { getIndicatorReviewContext } from '@/lib/indicatorReview'
+import { TrafficLight } from '@/components/shared/TrafficLight'
+import type { DiagnosticReport, Indicator } from '@/types'
 
 const GRADE_MAP: Record<string, { label: string; variant: 'default' | 'secondary' | 'outline' | 'destructive' }> = {
   S: { label: 'S - 优秀', variant: 'default' },
   A: { label: 'A - 良好', variant: 'default' },
   B: { label: 'B - 合格', variant: 'secondary' },
   C: { label: 'C - 待改进', variant: 'destructive' },
+}
+
+function IndicatorReviewMeta({ indicator, diagnostic }: { indicator: Indicator; diagnostic?: DiagnosticReport | null }) {
+  const context = getIndicatorReviewContext(indicator, diagnostic)
+  const hasMeta = context.targetDisplay || context.actualDisplay || context.status || context.scoringRule
+  if (!hasMeta) return null
+
+  return (
+    <div className="grid gap-x-4 gap-y-1 text-xs text-muted-foreground sm:grid-cols-2">
+      {context.targetDisplay && <span>目标值：{context.targetDisplay}</span>}
+      {context.actualDisplay && <span>实际完成：{context.actualDisplay}</span>}
+      {context.status && <TrafficLight status={context.status} className="sm:col-span-2" />}
+      {context.scoringRule && <span className="sm:col-span-2">评分标准：{context.scoringRule}</span>}
+      {context.targetLogic && <span className="sm:col-span-2">目标依据：{context.targetLogic}</span>}
+    </div>
+  )
 }
 
 export function CheckPage() {
@@ -32,6 +51,7 @@ export function CheckPage() {
   const { data: pendingTasks } = usePendingEvaluationTasks()
   const { data: finalResult } = useFinalResult(goal?.id)
   const { data: goalEvaluations } = useGoalEvaluations(goal?.id)
+  const { data: diagnostic } = useLatestDiagnostic(goal?.id)
   const qc = useQueryClient()
 
   const [items, setItems] = useState<Record<string, { score: string; comment: string }>>({})
@@ -213,6 +233,7 @@ export function CheckPage() {
                       {ind.name}
                       <span className="text-xs text-muted-foreground">权重 {Math.round(ind.weight * 100)}%</span>
                     </Label>
+                    <IndicatorReviewMeta indicator={ind} diagnostic={diagnostic} />
                     <div className="flex gap-2">
                       <Input type="number" min={0} max={100} placeholder="分数 (0-100)" className="w-36 shrink-0"
                         value={items[ind.id]?.score ?? selfAssessment?.items[ind.id]?.score ?? ''}
@@ -314,6 +335,7 @@ export function CheckPage() {
                   return (
                     <div key={task.id} className="flex flex-col gap-2 rounded-md border p-3">
                       <p className="text-sm font-medium">{ind?.name ?? task.indicator_id}</p>
+                      {ind && <IndicatorReviewMeta indicator={ind} diagnostic={diagnostic} />}
                       <div className="flex gap-2">
                         <Input type="number" min={0} max={100} placeholder="分数 (0-100)" className="w-36 shrink-0"
                           value={evalScores[task.indicator_id]?.score ?? ''}

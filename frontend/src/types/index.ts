@@ -82,6 +82,11 @@ export interface Indicator {
   target_value: number | null
   score_method: 'ratio' | 'mapping' | 'binary' | 'manual'
   redline: boolean
+  indicator_type?: 'positive' | 'negative' | 'qualitative' | 'redline' | null
+  unit?: string | null
+  target_display?: string | null
+  target_logic?: string | null
+  scoring_rule?: string | null
   created_at: string
 }
 
