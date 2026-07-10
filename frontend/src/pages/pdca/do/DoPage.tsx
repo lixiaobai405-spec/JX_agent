@@ -28,7 +28,8 @@ import {
   getDiagnosticToggleLabel,
 } from '@/lib/coaching'
 import { normalizeAgreementTerm } from '@/lib/copy'
-import type { CoachingRequest, Indicator } from '@/types'
+import { getDiagnosticIndicatorStatus } from '@/lib/pdcaFeedback'
+import type { CoachingRequest, DiagnosticReport, Indicator } from '@/types'
 
 function CheckinDialog({ indicator, onCheckinSubmit }: { indicator: Indicator; onCheckinSubmit?: () => void }) {
   const [open, setOpen] = useState(false)
@@ -206,9 +207,18 @@ function CoachingRequestDetailDialog({ request }: { request: CoachingRequest }) 
   )
 }
 
-function IndicatorCard({ indicator, onCheckinSubmit }: { indicator: Indicator; onCheckinSubmit?: () => void }) {
+function IndicatorCard({
+  indicator,
+  diagnostic,
+  onCheckinSubmit,
+}: {
+  indicator: Indicator
+  diagnostic?: DiagnosticReport | null
+  onCheckinSubmit?: () => void
+}) {
   const { data: checkins } = useIndicatorCheckins(indicator.id)
   const latestValue = checkins?.[0] ? (checkins[0].actual_value as Record<string, number>).value : null
+  const status = getDiagnosticIndicatorStatus(diagnostic, indicator)
 
   return (
     <Card>
@@ -217,6 +227,7 @@ function IndicatorCard({ indicator, onCheckinSubmit }: { indicator: Indicator; o
           <div className="flex items-center gap-2">
             <span className="text-sm font-medium">{indicator.name}</span>
             {indicator.redline && <Badge variant="destructive" className="text-xs">一票否决</Badge>}
+            <TrafficLight status={status} />
           </div>
           <div className="flex gap-2 text-xs text-muted-foreground">
             <span>权重 {Math.round(indicator.weight * 100)}%</span>
@@ -257,6 +268,7 @@ export function DoPage() {
     return (
       <div className="flex flex-col gap-4 max-w-3xl">
         <h1 className="text-2xl font-semibold">D - 执行追踪</h1>
+        <p className="text-sm text-muted-foreground">填报实际完成值，按单项指标生成红绿灯状态和偏差分析。</p>
         <Card><CardContent className="py-10 text-center text-muted-foreground">暂无考核期或合约未确认，请先完成 P 阶段</CardContent></Card>
       </div>
     )
@@ -267,7 +279,9 @@ export function DoPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold">D - 执行追踪</h1>
-          <p className="text-sm text-muted-foreground mt-1">{period.name}</p>
+          <p className="text-sm text-muted-foreground mt-1">
+            {period.name} · 填报实际完成值，按单项指标生成红绿灯状态和偏差分析。
+          </p>
         </div>
         {diagnostic && <TrafficLight status={diagnostic.traffic_light_status} />}
       </div>
@@ -286,7 +300,7 @@ export function DoPage() {
               <span>时间进度：{diagnostic.time_progress != null ? `${Math.round(diagnostic.time_progress)}%` : '—'}</span>
               {diagnostic.progress_deviation != null && (
                 <span className={diagnostic.progress_deviation < 0 ? 'text-destructive' : 'text-green-600'}>
-                  进度偏差：{diagnostic.progress_deviation > 0 ? '+' : ''}{Math.round(diagnostic.progress_deviation)}%
+                  进度偏差分析：{diagnostic.progress_deviation > 0 ? '+' : ''}{Math.round(diagnostic.progress_deviation)}%
                 </span>
               )}
             </div>
@@ -307,7 +321,12 @@ export function DoPage() {
           ) : (
             <div className="flex flex-col gap-2">
               {indicators.map((ind) => (
-                <IndicatorCard key={ind.id} indicator={ind} onCheckinSubmit={() => setHasPendingCheckin(true)} />
+                <IndicatorCard
+                  key={ind.id}
+                  indicator={ind}
+                  diagnostic={diagnostic}
+                  onCheckinSubmit={() => setHasPendingCheckin(true)}
+                />
               ))}
             </div>
           )}

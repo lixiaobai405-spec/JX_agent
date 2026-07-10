@@ -244,8 +244,10 @@ async def generate_final_result(db: AsyncSession, current_user: User, goal_id: s
             redline_count += 1
 
     c_result = calculate_c_stage(
-        [{"name": i.name, "weight": i.weight * 100} for i in indicators],
-        eval_scores
+        indicator_results,
+        eval_scores,
+        redline_triggered,
+        redline_count,
     )
 
     user = await db.get(User, goal.owner_user_id)

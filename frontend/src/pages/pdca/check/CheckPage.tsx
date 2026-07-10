@@ -15,6 +15,7 @@ import {
 } from '@/hooks'
 import { checkApi } from '@/api/check'
 import { hasInvalidScores, parseScoreInput, toScorePayload } from '@/lib/scores'
+import { C_GRADE_RULES, C_GRADE_RULE_TEXT } from '@/lib/pdcaFeedback'
 import { getIndicatorReviewContext } from '@/lib/indicatorReview'
 import { TrafficLight } from '@/components/shared/TrafficLight'
 import type { DiagnosticReport, Indicator } from '@/types'
@@ -153,6 +154,7 @@ export function CheckPage() {
     return (
       <div className="flex flex-col gap-4 max-w-2xl">
         <h1 className="text-2xl font-semibold">C - 考核评估</h1>
+        <p className="text-sm text-muted-foreground">结合自评、上级评分和定级规则生成最终绩效结果。</p>
         <Card><CardContent className="py-10 text-center text-muted-foreground">请先完成 P 和 D 阶段</CardContent></Card>
       </div>
     )
@@ -162,6 +164,7 @@ export function CheckPage() {
     return (
       <div className="flex flex-col gap-4 max-w-2xl">
         <h1 className="text-2xl font-semibold">C - 考核评估</h1>
+        <p className="text-sm text-muted-foreground">结合自评、上级评分和定级规则生成最终绩效结果。</p>
         <Card><CardContent className="py-10 text-center text-muted-foreground">D 阶段尚未完成，请联系经理标记完成后再进行考核评估</CardContent></Card>
       </div>
     )
@@ -171,7 +174,9 @@ export function CheckPage() {
     <div className="flex flex-col gap-6 max-w-2xl">
       <div>
         <h1 className="text-2xl font-semibold">C - 考核评估</h1>
-        <p className="text-sm text-muted-foreground mt-1">{period.name}</p>
+        <p className="text-sm text-muted-foreground mt-1">
+          {period.name} · 结合自评、上级评分和定级规则生成最终绩效结果。
+        </p>
       </div>
 
       {finalResult && (
@@ -196,6 +201,21 @@ export function CheckPage() {
           </CardContent>
         </Card>
       )}
+
+      <Card>
+        <CardContent className="flex flex-col gap-2 py-4">
+          <p className="text-sm font-medium">定级说明</p>
+          <p className="text-xs text-muted-foreground">{C_GRADE_RULE_TEXT}</p>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {C_GRADE_RULES.map((rule) => (
+              <div key={rule.grade} className="rounded-md border px-3 py-2">
+                <p className="text-sm font-semibold">{rule.grade}</p>
+                <p className="text-xs text-muted-foreground">{rule.label} · {rule.range}</p>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
 
       {/* 自评 */}
       <Card>
