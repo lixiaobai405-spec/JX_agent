@@ -296,6 +296,42 @@ async def list_team_plans(db: AsyncSession, current_user: User):
 
 
 # Inheritance Suggestion Service
+def _dict_text(value: dict | str | None) -> str:
+    if not value:
+        return ""
+    if isinstance(value, str):
+        return value
+    text = value.get("text")
+    return text if isinstance(text, str) else ""
+
+
+def _short_text(value: str, fallback: str, max_len: int = 24) -> str:
+    text = " ".join(value.split())
+    if not text:
+        return fallback
+    return text if len(text) <= max_len else f"{text[:max_len]}..."
+
+
+def _build_inheritance_suggestions(dev_plan: DevelopmentPlan) -> dict:
+    goal_text = _dict_text(dev_plan.goals)
+    action_text = _dict_text(dev_plan.actions)
+    focus = _short_text(goal_text, "本期 IDP 改进项")
+
+    return {
+        "summary": f"建议将「{focus}」延续为下周期发展目标，并设置过程完成度指标跟踪落地。",
+        "recommendations": [
+            {
+                "name": f"{focus}完成度",
+                "definition": "跟踪本期 IDP 改进动作在下周期的落地比例和里程碑完成情况",
+                "target_display": "100%",
+                "reason": "承接本期复盘和 IDP，确保改进项进入下周期正式跟踪。",
+                "source_goal": goal_text,
+                "source_actions": action_text,
+            }
+        ],
+    }
+
+
 async def generate_inheritance_suggestions(db: AsyncSession, current_user: User, user_id: str, from_period_id: str, to_period_id: str):
     query = select(DevelopmentPlan).join(ReviewReport).join(FinalResult).join(Goal).where(
         DevelopmentPlan.user_id == user_id,
@@ -318,10 +354,7 @@ async def generate_inheritance_suggestions(db: AsyncSession, current_user: User,
     if not final_result:
         return []
 
-    suggestions_data = {
-        "suggestion_type": "new_indicator",
-        "recommendations": []
-    }
+    suggestions_data = _build_inheritance_suggestions(dev_plan)
 
     suggestion = InheritanceSuggestion(
         user_id=user_id,

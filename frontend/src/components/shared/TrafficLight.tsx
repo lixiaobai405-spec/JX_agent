@@ -8,7 +8,7 @@ interface TrafficLightProps {
 
 const MAP = {
   green: { color: 'bg-green-500', label: '正常' },
-  yellow: { color: 'bg-yellow-400', label: '偏差' },
+  yellow: { color: 'bg-yellow-400', label: '偏差分析' },
   red: { color: 'bg-red-500', label: '预警' },
 }
 
