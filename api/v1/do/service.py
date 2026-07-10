@@ -8,6 +8,7 @@ from models.check_phase import Goal, Indicator
 from models.plan_phase import PerformanceContract
 from models.user import User, UserRole
 from models.period import Period
+from utils.text_formatting import markdown_to_plain_text
 
 
 def _enum_value(value):
@@ -189,6 +190,7 @@ async def generate_diagnostic_report(db: AsyncSession, current_user: User, goal_
 
     try:
         d_result = run_d_stage(indicators_data, actuals, feedback)
+        feedback_text = markdown_to_plain_text(d_result.get("feedback_text", ""))
 
         report = DiagnosticReport(
             goal_id=goal_id,
@@ -199,8 +201,8 @@ async def generate_diagnostic_report(db: AsyncSession, current_user: User, goal_
             time_progress=d_result["d_result"].get("time_progress"),
             progress_deviation=d_result["d_result"]["deviation"],
             indicators_analysis={"indicator_results": d_result["d_result"]["indicator_results"]},
-            root_cause_analysis={"content": d_result.get("feedback_text", "")},
-            improvement_suggestions={"feedback": d_result.get("feedback_text", "")},
+            root_cause_analysis={"content": feedback_text},
+            improvement_suggestions={"feedback": feedback_text},
             traffic_light_status=d_result["d_result"]["overall_status"],
             generated_by_ai=True
         )

@@ -13,6 +13,7 @@ wheels/
 other
 .vscode
 .env
+AGENTS.md
 jx-db*
 *.log
 # Frontend dependencies/build
