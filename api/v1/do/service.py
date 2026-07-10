@@ -8,7 +8,7 @@ from models.check_phase import Goal, Indicator
 from models.plan_phase import PerformanceContract
 from models.user import User, UserRole
 from models.period import Period
-from utils.text_formatting import markdown_to_plain_text
+from utils.text_formatting import normalize_markdown_text
 
 
 def _enum_value(value):
@@ -190,7 +190,7 @@ async def generate_diagnostic_report(db: AsyncSession, current_user: User, goal_
 
     try:
         d_result = run_d_stage(indicators_data, actuals, feedback)
-        feedback_text = markdown_to_plain_text(d_result.get("feedback_text", ""))
+        feedback_text = normalize_markdown_text(d_result.get("feedback_text", ""))
 
         report = DiagnosticReport(
             goal_id=goal_id,

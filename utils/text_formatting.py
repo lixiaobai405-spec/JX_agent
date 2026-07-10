@@ -53,6 +53,19 @@ def _decode_escaped_newlines(text: str) -> str:
     )
 
 
+def normalize_markdown_text(value) -> str:
+    """Unwrap AI JSON-ish output while preserving readable Markdown."""
+    text = _decode_escaped_newlines(_unwrap_json_text(_extract_text(value)))
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+
+    lines = [line.strip() for line in text.split("\n")]
+    text = "\n".join(lines)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = re.sub(r"(?<!\n)\n(#{1,6}\s+)", r"\n\n\1", text)
+    text = re.sub(r"(?<!\n)\n(\d+\.\s+)", r"\n\n\1", text)
+    return text.strip()
+
+
 def markdown_to_plain_text(value) -> str:
     """Convert AI Markdown/JSON-ish output into readable plain text."""
     text = _decode_escaped_newlines(_unwrap_json_text(_extract_text(value)))

@@ -27,7 +27,7 @@ import {
   getCoachingStatusLabel,
   getDiagnosticToggleLabel,
 } from '@/lib/coaching'
-import { normalizeAgreementTerm } from '@/lib/copy'
+import { normalizeDiagnosticMarkdown } from '@/lib/diagnosticMarkdown'
 import { getDiagnosticIndicatorStatus } from '@/lib/pdcaFeedback'
 import type { CoachingRequest, DiagnosticReport, Indicator } from '@/types'
 
@@ -241,6 +241,14 @@ function IndicatorCard({
   )
 }
 
+function DiagnosticMarkdown({ content }: { content: string }) {
+  return (
+    <div className="prose prose-sm max-w-none break-words leading-7 dark:prose-invert prose-headings:mb-2 prose-headings:mt-4 prose-p:my-2 prose-ol:my-2 prose-ol:pl-5 prose-ul:my-2 prose-ul:pl-5 prose-li:my-1 prose-hr:my-4 prose-hr:border-border">
+      <ReactMarkdown>{content}</ReactMarkdown>
+    </div>
+  )
+}
+
 export function DoPage() {
   const { data: period } = useCurrentPeriod()
   const { data: goal } = useCurrentGoal(period?.id)
@@ -254,6 +262,11 @@ export function DoPage() {
   const [diagFeedback, setDiagFeedback] = useState('')
   const [hasPendingCheckin, setHasPendingCheckin] = useState(false)
   const [isDiagnosticOpen, setIsDiagnosticOpen] = useState(true)
+  const rootCauseMarkdown = normalizeDiagnosticMarkdown(diagnostic?.root_cause_analysis)
+  const improvementMarkdown = normalizeDiagnosticMarkdown(diagnostic?.improvement_suggestions)
+  const shouldShowImprovementMarkdown = Boolean(
+    improvementMarkdown && improvementMarkdown !== rootCauseMarkdown,
+  )
 
   const { mutate: generateDiag, isPending: genDiagPending } = useMutation({
     mutationFn: () => doApi.generateDiagnostic(goal!.id, diagFeedback || undefined),
@@ -375,28 +388,16 @@ export function DoPage() {
               </CardHeader>
               {isDiagnosticOpen && (
                 <CardContent className="flex flex-col gap-3 text-sm">
-                  {diagnostic.root_cause_analysis && (
+                  {rootCauseMarkdown && (
                     <div>
-                      <p className="font-medium mb-1 text-muted-foreground">根因分析</p>
-                      <div className="prose prose-sm max-w-none dark:prose-invert">
-                        <ReactMarkdown>{
-                          typeof diagnostic.root_cause_analysis === 'string'
-                            ? normalizeAgreementTerm(diagnostic.root_cause_analysis)
-                            : normalizeAgreementTerm(JSON.stringify(diagnostic.root_cause_analysis))
-                        }</ReactMarkdown>
-                      </div>
+                      <p className="font-medium mb-1 text-muted-foreground">诊断内容</p>
+                      <DiagnosticMarkdown content={rootCauseMarkdown} />
                     </div>
                   )}
-                  {diagnostic.improvement_suggestions && (
+                  {shouldShowImprovementMarkdown && (
                     <div>
                       <p className="font-medium mb-1 text-muted-foreground">改进建议</p>
-                      <div className="prose prose-sm max-w-none dark:prose-invert">
-                        <ReactMarkdown>{
-                          typeof diagnostic.improvement_suggestions === 'string'
-                            ? normalizeAgreementTerm(diagnostic.improvement_suggestions)
-                            : normalizeAgreementTerm((diagnostic.improvement_suggestions as Record<string, string>).feedback ?? JSON.stringify(diagnostic.improvement_suggestions))
-                        }</ReactMarkdown>
-                      </div>
+                      <DiagnosticMarkdown content={improvementMarkdown} />
                     </div>
                   )}
                 </CardContent>
