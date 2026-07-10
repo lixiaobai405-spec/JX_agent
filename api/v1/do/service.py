@@ -5,8 +5,75 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.do_phase import DataCheckin, DiagnosticReport, CoachingRequest
 from models.check_phase import Goal, Indicator
+from models.plan_phase import PerformanceContract
 from models.user import User, UserRole
 from models.period import Period
+
+
+def _enum_value(value):
+    return getattr(value, "value", value)
+
+
+def _format_number(value: float | int | None) -> str | None:
+    if value is None:
+        return None
+    return f"{value:g}"
+
+
+def _contract_indicator_index(contract_data: dict | None) -> dict[str, dict]:
+    indicators = (contract_data or {}).get("indicators", [])
+    return {
+        item["name"]: item
+        for item in indicators
+        if isinstance(item, dict) and item.get("name")
+    }
+
+
+async def _get_goal_contract_indicator_index(db: AsyncSession, goal_id: str) -> dict[str, dict]:
+    goal = await db.get(Goal, goal_id)
+    if not goal or not goal.performance_contract_id:
+        return {}
+    contract = await db.get(PerformanceContract, goal.performance_contract_id)
+    if not contract:
+        return {}
+    return _contract_indicator_index(contract.contract_data)
+
+
+def _fallback_indicator_type(indicator) -> str:
+    if indicator.redline:
+        return "redline"
+    return _enum_value(indicator.direction)
+
+
+def _target_display(indicator, contract_indicator: dict | None) -> str | None:
+    if contract_indicator and contract_indicator.get("target_display"):
+        return contract_indicator["target_display"]
+    target = _format_number(indicator.target_value)
+    if target is None:
+        return None
+    unit = contract_indicator.get("unit") if contract_indicator else None
+    return f"{target}{unit}" if unit else target
+
+
+def build_indicator_response(indicator, contract_indicator: dict | None = None) -> dict:
+    indicator_type = (contract_indicator or {}).get("type") or _fallback_indicator_type(indicator)
+    return {
+        "id": indicator.id,
+        "goal_id": indicator.goal_id,
+        "name": indicator.name,
+        "definition": indicator.definition,
+        "direction": _enum_value(indicator.direction),
+        "weight": indicator.weight,
+        "target_value": indicator.target_value,
+        "score_method": _enum_value(indicator.score_method),
+        "redline": indicator.redline,
+        "indicator_type": indicator_type,
+        "unit": (contract_indicator or {}).get("unit"),
+        "target_display": _target_display(indicator, contract_indicator),
+        "target_logic": (contract_indicator or {}).get("target_logic"),
+        "scoring_rule": (contract_indicator or {}).get("scoring_rule"),
+        "created_at": indicator.created_at,
+    }
 
 
 # Goals and Indicators
@@ -26,7 +93,12 @@ async def get_current_goal(db: AsyncSession, current_user: User, period_id: str)
 async def list_goal_indicators(db: AsyncSession, goal_id: str):
     query = select(Indicator).where(Indicator.goal_id == goal_id)
     result = await db.execute(query)
-    return result.scalars().all()
+    indicators = result.scalars().all()
+    contract_indicators = await _get_goal_contract_indicator_index(db, goal_id)
+    return [
+        build_indicator_response(indicator, contract_indicators.get(indicator.name))
+        for indicator in indicators
+    ]
 
 
 # Data Checkins
@@ -89,6 +161,7 @@ async def generate_diagnostic_report(db: AsyncSession, current_user: User, goal_
     query = select(Indicator).where(Indicator.goal_id == goal_id)
     result = await db.execute(query)
     indicators = result.scalars().all()
+    contract_indicators = await _get_goal_contract_indicator_index(db, goal_id)
 
     indicators_data = []
     actuals = {}
@@ -100,13 +173,16 @@ async def generate_diagnostic_report(db: AsyncSession, current_user: User, goal_
         actual_val = latest_checkin.actual_value.get("value", 0) if latest_checkin else 0
         actuals[ind.name] = actual_val
 
-        indicator_type = "redline" if ind.redline else ("positive" if ind.direction == "positive" else "negative")
+        contract_indicator = contract_indicators.get(ind.name, {})
+        indicator_type = contract_indicator.get("type") or (
+            "redline" if ind.redline else ("positive" if ind.direction == "positive" else "negative")
+        )
 
         indicators_data.append({
             "name": ind.name,
             "type": indicator_type,
             "target": ind.target_value or 0,
-            "target_display": str(ind.target_value or 0),
+            "target_display": _target_display(ind, contract_indicator) or str(ind.target_value or 0),
             "weight": ind.weight * 100,
             "is_redline": ind.redline
         })
