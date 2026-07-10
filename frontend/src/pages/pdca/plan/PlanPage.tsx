@@ -28,6 +28,52 @@ type ContractIndicator = {
   weight: number
   is_redline?: boolean
   target?: number
+  type?: 'positive' | 'negative' | 'qualitative' | 'redline'
+  unit?: string
+  target_display?: string
+  target_logic?: string
+  scoring_rule?: string
+}
+
+const INDICATOR_TYPE_LABELS: Record<string, string> = {
+  positive: '定量 · 正向',
+  negative: '定量 · 反向',
+  qualitative: '定性',
+  redline: '红线',
+}
+
+function indicatorTargetText(indicator: ContractIndicator): string | null {
+  if (indicator.target_display) return indicator.target_display
+  if (indicator.target == null) return null
+  return `${indicator.target}${indicator.unit ?? ''}`
+}
+
+function ContractIndicatorRow({ indicator }: { indicator: ContractIndicator }) {
+  const targetText = indicatorTargetText(indicator)
+
+  return (
+    <div className="flex items-start justify-between gap-3 py-2.5 text-sm">
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-medium">{normalizeAgreementTerm(indicator.name)}</span>
+          {indicator.type && (
+            <Badge variant="outline" className="text-xs">
+              {INDICATOR_TYPE_LABELS[indicator.type] ?? indicator.type}
+            </Badge>
+          )}
+        </div>
+        <div className="flex flex-col gap-0.5 text-xs text-muted-foreground">
+          {targetText && <span>目标值：{targetText}</span>}
+          {indicator.target_logic && <span>目标依据：{indicator.target_logic}</span>}
+          {indicator.scoring_rule && <span>评分标准：{indicator.scoring_rule}</span>}
+        </div>
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        {!indicator.is_redline && <Badge variant="secondary">{Math.round(indicator.weight)}%</Badge>}
+        {indicator.is_redline && <Badge variant="destructive">一票否决</Badge>}
+      </div>
+    </div>
+  )
 }
 
 function JobAnalysisStep({ onDone }: { onDone: (a: JobAnalysis) => void }) {
@@ -103,16 +149,7 @@ function GenerateContractStep({ analysis, periodId, onDone }: {
           <CardContent>
             <div className="flex flex-col divide-y">
               {indicators.map((ind, i) => (
-                <div key={i} className="flex items-center justify-between py-2 text-sm">
-                  <div className="flex flex-col gap-0.5">
-                    <span>{normalizeAgreementTerm(ind.name)}</span>
-                    {ind.target != null && <span className="text-xs text-muted-foreground">目标值：{ind.target}</span>}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {!ind.is_redline && <Badge variant="outline">{Math.round(ind.weight)}%</Badge>}
-                    {ind.is_redline && <Badge variant="destructive">一票否决</Badge>}
-                  </div>
-                </div>
+                <ContractIndicatorRow key={i} indicator={ind} />
               ))}
             </div>
           </CardContent>
@@ -158,16 +195,7 @@ function ConfirmContractStep({ contract, onConfirmed }: { contract: PerformanceC
         <CardContent>
           <div className="flex flex-col divide-y">
             {indicators.map((ind, i) => (
-              <div key={i} className="flex items-center justify-between py-2.5 text-sm">
-                <div className="flex flex-col gap-0.5">
-                  <span className="font-medium">{normalizeAgreementTerm(ind.name)}</span>
-                  {ind.target != null && <span className="text-xs text-muted-foreground">目标值：{ind.target}</span>}
-                </div>
-                <div className="flex items-center gap-2">
-                  {!ind.is_redline && <Badge variant="secondary">{Math.round(ind.weight)}%</Badge>}
-                  {ind.is_redline && <Badge variant="destructive">一票否决</Badge>}
-                </div>
-              </div>
+              <ContractIndicatorRow key={i} indicator={ind} />
             ))}
           </div>
         </CardContent>

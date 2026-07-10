@@ -128,11 +128,23 @@ def _indicator_direction(ind_data: dict):
     return IndicatorDirection.positive
 
 
+def _indicator_score_method(ind_data: dict):
+    from models.check_phase import ScoreMethod
+
+    if ind_data.get("type") == "redline":
+        return ScoreMethod.binary
+    if ind_data.get("type") == "qualitative":
+        return ScoreMethod.manual
+    return ScoreMethod.ratio
+
+
 def _indicator_definition(ind_data: dict) -> str:
     definition = ind_data.get("definition") or ""
     details = []
     if ind_data.get("target_display"):
         details.append(f"目标：{ind_data['target_display']}")
+    if ind_data.get("target_logic"):
+        details.append(f"目标依据：{ind_data['target_logic']}")
     if ind_data.get("scoring_rule"):
         details.append(f"评分：{ind_data['scoring_rule']}")
     if not details:
@@ -221,7 +233,7 @@ async def get_contract(db: AsyncSession, contract_id: str) -> PerformanceContrac
 
 async def confirm_contract(db: AsyncSession, current_user: User, contract_id: str, confirmed_by: str) -> PerformanceContract:
     from core.exceptions import ContractConfirmedError, GoalAlreadyExistsError
-    from models.check_phase import Goal, Indicator, IndicatorDirection, ScoreMethod
+    from models.check_phase import Goal, Indicator
 
     contract = await get_contract(db, contract_id)
 
@@ -256,7 +268,7 @@ async def confirm_contract(db: AsyncSession, current_user: User, contract_id: st
             direction=_indicator_direction(ind_data),
             weight=ind_data.get("weight", 0) / 100.0,
             target_value=ind_data.get("target"),
-            score_method=ScoreMethod.ratio,
+            score_method=_indicator_score_method(ind_data),
             redline=_is_redline_indicator(ind_data)
         )
         db.add(indicator)

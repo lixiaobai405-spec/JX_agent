@@ -24,6 +24,11 @@ class IndicatorResponse(BaseModel):
     target_value: float | None
     score_method: str
     redline: bool
+    indicator_type: str | None = None
+    unit: str | None = None
+    target_display: str | None = None
+    target_logic: str | None = None
+    scoring_rule: str | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
