@@ -1,6 +1,8 @@
-from datetime import datetime
+from datetime import date, datetime
 from pydantic import BaseModel, field_validator
 
+from models.check_phase import FinalResultStatus
+from models.do_phase import TrafficLightStatus
 from models.period import PeriodStatus
 
 
@@ -47,6 +49,41 @@ class PeriodResponse(BaseModel):
 
 class PeriodListResponse(BaseModel):
     items: list[PeriodResponse]
+    total: int
+    page: int
+    page_size: int
+
+
+class DiagnosticSummary(BaseModel):
+    id: str
+    report_date: date
+    weighted_achievement_rate: float | None
+    traffic_light_status: TrafficLightStatus | None
+
+
+class FinalResultSummary(BaseModel):
+    id: str
+    final_grade: str
+    status: FinalResultStatus
+    confirmed_at: datetime
+
+
+class PeriodHistoryItem(BaseModel):
+    period_id: str
+    user_id: str
+    name: str
+    start_date: datetime
+    end_date: datetime
+    status: PeriodStatus
+    description: str | None
+    goal_id: str | None
+    diagnostic_summary: DiagnosticSummary | None
+    final_result_summary: FinalResultSummary | None
+    has_data_conflict: bool
+
+
+class PeriodHistoryResponse(BaseModel):
+    items: list[PeriodHistoryItem]
     total: int
     page: int
     page_size: int

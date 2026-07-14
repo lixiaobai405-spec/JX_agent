@@ -3,8 +3,11 @@ from datetime import datetime, timezone
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.exceptions import UserAccessDeniedError, UserNotFoundError
+from models.check_phase import FinalResult, Goal
+from models.do_phase import DiagnosticReport
 from models.period import Period, PeriodStatus
-from models.user import User, UserRole
+from models.user import User, UserRole, UserStatus
 
 
 STATUS_FLOW = {
@@ -16,9 +19,26 @@ STATUS_FLOW = {
 
 
 async def _get_subordinate_ids(db: AsyncSession, manager_id: str) -> list[str]:
-    """Get all subordinate user IDs for a manager."""
-    from api.v1.users.service import _get_subordinate_ids as get_subs
-    return await get_subs(db, manager_id)
+    direct_reports = (
+        select(User.id.label("id"))
+        .where(
+            User.manager_id == manager_id,
+            User.status == UserStatus.active,
+            User.deleted_at.is_(None),
+        )
+        .cte("subordinate_ids", recursive=True)
+    )
+    descendants = (
+        select(User.id.label("id"))
+        .join(direct_reports, User.manager_id == direct_reports.c.id)
+        .where(
+            User.status == UserStatus.active,
+            User.deleted_at.is_(None),
+        )
+    )
+    subordinate_ids = direct_reports.union_all(descendants)
+    result = await db.execute(select(subordinate_ids.c.id))
+    return list(result.scalars().all())
 
 
 async def create_period(db: AsyncSession, current_user: User, data: dict) -> Period:
@@ -83,6 +103,149 @@ async def list_periods(
         "total": total,
         "page": page,
         "page_size": limit
+    }
+
+
+async def list_period_history(
+    db: AsyncSession,
+    current_user: User,
+    user_id: str | None = None,
+    page: int = 1,
+    limit: int = 20,
+) -> dict:
+    target_user_id = current_user.id if user_id is None else user_id
+
+    if target_user_id != current_user.id and current_user.role not in (
+        UserRole.hr_admin,
+        UserRole.system_admin,
+    ):
+        if current_user.role != UserRole.manager:
+            raise UserAccessDeniedError()
+        subordinate_ids = await _get_subordinate_ids(db, current_user.id)
+        if target_user_id not in subordinate_ids:
+            raise UserAccessDeniedError()
+
+    target_result = await db.execute(
+        select(User.id).where(
+            User.id == target_user_id,
+            User.deleted_at.is_(None),
+        )
+    )
+    if target_result.scalar_one_or_none() is None:
+        raise UserNotFoundError()
+
+    page = max(page, 1)
+    limit = max(1, min(limit, 100))
+    period_filters = (
+        Period.user_id == target_user_id,
+        Period.status.in_((PeriodStatus.closed, PeriodStatus.archived)),
+        Period.deleted_at.is_(None),
+    )
+
+    count_result = await db.execute(
+        select(func.count()).select_from(Period).where(*period_filters)
+    )
+    total = count_result.scalar_one()
+
+    period_result = await db.execute(
+        select(Period)
+        .where(*period_filters)
+        .order_by(Period.end_date.desc(), Period.id.desc())
+        .offset((page - 1) * limit)
+        .limit(limit)
+    )
+    periods = period_result.scalars().all()
+    period_ids = [period.id for period in periods]
+
+    goal_result = await db.execute(
+        select(Goal)
+        .where(
+            Goal.period_id.in_(period_ids),
+            Goal.owner_user_id == target_user_id,
+            Goal.deleted_at.is_(None),
+        )
+        .order_by(Goal.period_id, Goal.id)
+    )
+    goals_by_period: dict[str, list[Goal]] = {}
+    for goal in goal_result.scalars().all():
+        goals_by_period.setdefault(goal.period_id, []).append(goal)
+
+    goal_by_period = {
+        period_id: goals[0]
+        for period_id, goals in goals_by_period.items()
+        if len(goals) == 1
+    }
+    goal_ids = [goal.id for goal in goal_by_period.values()]
+
+    diagnostic_result = await db.execute(
+        select(DiagnosticReport)
+        .where(
+            DiagnosticReport.goal_id.in_(goal_ids),
+            DiagnosticReport.user_id == target_user_id,
+        )
+        .order_by(
+            DiagnosticReport.goal_id,
+            DiagnosticReport.created_at.desc(),
+            DiagnosticReport.id.desc(),
+        )
+    )
+    latest_diagnostic_by_goal: dict[str, DiagnosticReport] = {}
+    for diagnostic in diagnostic_result.scalars().all():
+        latest_diagnostic_by_goal.setdefault(diagnostic.goal_id, diagnostic)
+
+    final_result = await db.execute(
+        select(FinalResult)
+        .where(
+            FinalResult.goal_id.in_(goal_ids),
+            FinalResult.deleted_at.is_(None),
+        )
+        .order_by(
+            FinalResult.goal_id,
+            FinalResult.confirmed_at.desc(),
+            FinalResult.id.desc(),
+        )
+    )
+    final_result_by_goal: dict[str, FinalResult] = {}
+    for result in final_result.scalars().all():
+        final_result_by_goal.setdefault(result.goal_id, result)
+
+    items = []
+    for period in periods:
+        period_goals = goals_by_period.get(period.id, [])
+        has_data_conflict = len(period_goals) > 1
+        goal = goal_by_period.get(period.id)
+        diagnostic = latest_diagnostic_by_goal.get(goal.id) if goal else None
+        result = final_result_by_goal.get(goal.id) if goal else None
+
+        items.append({
+            "period_id": period.id,
+            "user_id": period.user_id,
+            "name": period.name,
+            "start_date": period.start_date,
+            "end_date": period.end_date,
+            "status": period.status,
+            "description": period.description,
+            "goal_id": goal.id if goal else None,
+            "diagnostic_summary": {
+                "id": diagnostic.id,
+                "report_date": diagnostic.report_date,
+                "weighted_achievement_rate": diagnostic.weighted_achievement_rate,
+                "traffic_light_status": diagnostic.traffic_light_status,
+            } if diagnostic else None,
+            "final_result_summary": {
+                "id": result.id,
+                "final_grade": result.final_grade,
+                "status": result.status,
+                "confirmed_at": result.confirmed_at,
+            } if result else None,
+            "has_data_conflict": has_data_conflict,
+        })
+
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "page_size": limit,
     }
 
 

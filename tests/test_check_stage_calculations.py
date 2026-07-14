@@ -1,4 +1,4 @@
-from utils.calculations import calculate_c_stage
+from utils.calculations import calc_achievement_rate, calculate_c_stage
 
 
 def test_calculate_c_stage_skips_redline_weight_and_applies_deduction():
@@ -16,3 +16,11 @@ def test_calculate_c_stage_skips_redline_weight_and_applies_deduction():
     assert result["deductions"] == 20
     assert result["total_score"] == 60
     assert result["grade"] == "C"
+
+
+def test_positive_achievement_rate_returns_zero_for_negative_actual():
+    assert calc_achievement_rate("positive", 100, -1) == 0
+
+
+def test_positive_achievement_rate_returns_zero_for_nan_actual():
+    assert calc_achievement_rate("positive", 100, float("nan")) == 0

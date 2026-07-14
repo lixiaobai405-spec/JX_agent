@@ -1,5 +1,7 @@
 from datetime import datetime
-from pydantic import BaseModel
+from typing import Annotated
+
+from pydantic import BaseModel, StringConstraints
 
 
 class JobAnalysisCreate(BaseModel):
@@ -24,7 +26,10 @@ class JobAnalysisResponse(BaseModel):
 
 
 class ContractGenerateRequest(BaseModel):
-    period_id: str
+    period_id: Annotated[
+        str,
+        StringConstraints(strip_whitespace=True, min_length=1),
+    ]
     user_id: str
     job_analysis_id: str
     feedback: str | None = None
