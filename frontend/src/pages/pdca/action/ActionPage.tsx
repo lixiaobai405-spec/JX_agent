@@ -19,8 +19,6 @@ import { AILoadingSkeleton } from '@/components/shared/AILoadingSkeleton'
 import { getPlanText, getSuggestionSummary } from '@/lib/pdcaFeedback'
 import {
   DEFAULT_MARKDOWN_EDITOR_MODE,
-  formatMarkdownPreview,
-  normalizeEditableMarkdown,
   toggleMarkdownEditorMode,
   type MarkdownEditorMode,
 } from '@/lib/markdownEditor'
@@ -38,7 +36,7 @@ type PlanAiSuggestions = {
 function MarkdownPreview({ content }: { content: string }) {
   return (
     <div className="max-w-none rounded-md border bg-background px-4 py-3 text-sm leading-6 break-words [&_h1]:mb-3 [&_h1]:text-xl [&_h1]:font-semibold [&_h2]:mb-3 [&_h2]:text-lg [&_h2]:font-semibold [&_h3]:mb-2 [&_h3]:font-semibold [&_li]:my-1 [&_ol]:mb-3 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_strong]:font-semibold [&_ul]:mb-3 [&_ul]:list-disc [&_ul]:pl-6">
-      <ReactMarkdown>{formatMarkdownPreview(content)}</ReactMarkdown>
+      <ReactMarkdown>{content}</ReactMarkdown>
     </div>
   )
 }
@@ -85,8 +83,8 @@ export function ActionPage() {
   const planAiSuggestions = plan?.ai_suggestions as PlanAiSuggestions | null | undefined
   const planGoalText = planGoals ?? getPlanText(plan?.goals)
   const planActionText = planActions ?? getPlanText(plan?.actions)
-  const polishedGoalText = normalizeEditableMarkdown(polishedGoals ?? planAiSuggestions?.polished_goals ?? '')
-  const polishedActionText = normalizeEditableMarkdown(polishedActions ?? planAiSuggestions?.polished_actions ?? '')
+  const polishedGoalText = polishedGoals ?? planAiSuggestions?.polished_goals ?? ''
+  const polishedActionText = polishedActions ?? planAiSuggestions?.polished_actions ?? ''
 
   const planPayload = () => ({
     goals: { text: planGoalText },
@@ -137,8 +135,8 @@ export function ActionPage() {
     },
     onSuccess: (updatedPlan) => {
       const suggestions = updatedPlan.ai_suggestions as PlanAiSuggestions | null
-      setPolishedGoals(normalizeEditableMarkdown(suggestions?.polished_goals || ''))
-      setPolishedActions(normalizeEditableMarkdown(suggestions?.polished_actions || ''))
+      setPolishedGoals(suggestions?.polished_goals || '')
+      setPolishedActions(suggestions?.polished_actions || '')
       setPolishMode(DEFAULT_MARKDOWN_EDITOR_MODE)
       toast.success('AI 审核完成')
       qc.invalidateQueries({ queryKey: ['my-plans'] })
