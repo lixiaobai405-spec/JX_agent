@@ -10,7 +10,7 @@ if str(ROOT) not in sys.path:
 from sqlalchemy import select
 
 from api.v1.do import service as do_service
-from models.check_phase import Goal, Indicator
+from models.check_phase import Goal, Indicator, ScoreMethod
 from models.do_phase import TrafficLightStatus
 from models.period import Period
 from models.user import User
@@ -75,11 +75,18 @@ async def _verify_d_stage_demo_impl() -> None:
         assert set(S_ROLE_ACTUALS).issubset(indicators), sorted(indicators)
 
         for name, actual in S_ROLE_ACTUALS.items():
+            indicator = indicators[name]
+            if indicator.redline:
+                actual_value = {"value_type": "redline", "value": actual}
+            elif indicator.score_method == ScoreMethod.manual:
+                actual_value = {"value_type": "qualitative", "value": "completed"}
+            else:
+                actual_value = {"value_type": "quantitative", "value": actual}
             await do_service.submit_checkin(
                 session,
                 current_user=user,
-                indicator_id=indicators[name].id,
-                actual_value=actual,
+                indicator_id=indicator.id,
+                actual_value=actual_value,
                 progress_description=f"{name}演示打卡：实际值{actual}",
                 issues="核心便利系统推进偏慢" if name in {"区域净销售额", "新品铺货率"} else None,
             )

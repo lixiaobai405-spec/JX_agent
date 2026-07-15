@@ -72,6 +72,8 @@ export interface Goal {
   created_at: string
 }
 
+export type IndicatorType = 'positive' | 'negative' | 'qualitative' | 'redline'
+
 export interface Indicator {
   id: string
   goal_id: string
@@ -82,7 +84,7 @@ export interface Indicator {
   target_value: number | null
   score_method: 'ratio' | 'mapping' | 'binary' | 'manual'
   redline: boolean
-  indicator_type?: 'positive' | 'negative' | 'qualitative' | 'redline' | null
+  indicator_type?: IndicatorType | null
   unit?: string | null
   target_display?: string | null
   target_logic?: string | null
@@ -109,11 +111,18 @@ export interface DiagnosticReport {
   created_at: string
 }
 
+export type QualitativeCheckinStatus = 'not_started' | 'in_progress' | 'completed' | 'exceeded'
+
+export type CheckinValue =
+  | { value_type: 'quantitative'; value: number }
+  | { value_type: 'qualitative'; value: QualitativeCheckinStatus }
+  | { value_type: 'redline'; value: number }
+
 export interface DataCheckin {
   id: string
   indicator_id: string
   user_id: string
-  actual_value: Record<string, unknown>
+  actual_value: CheckinValue
   progress_description: string | null
   issues: string | null
   submitted_at: string
@@ -325,12 +334,36 @@ export interface JobAnalysis {
   created_at: string
 }
 
+export interface ContractIndicator {
+  id: string | number
+  name: string
+  definition?: string | null
+  weight: number
+  is_redline?: boolean
+  target?: number | null
+  type?: IndicatorType
+  unit?: string | null
+  target_display?: string | null
+  target_logic?: string | null
+  scoring_rule?: string | null
+}
+
+export interface PerformanceContractData extends Record<string, unknown> {
+  indicators?: ContractIndicator[]
+  period_id?: string
+  suggested_position_name?: string
+  classification_reasoning?: string
+  assessment_period?: string
+  coaching_period?: string
+  result_application?: string
+}
+
 export interface PerformanceContract {
   id: string
   goal_id: string | null
   job_prototype_code: string
   strategy_config: Record<string, unknown>
-  contract_data: Record<string, unknown>
+  contract_data: PerformanceContractData
   ai_generated: boolean
   confirmed_at: string | null
   confirmed_by: string | null

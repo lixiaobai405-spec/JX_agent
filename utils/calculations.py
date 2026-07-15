@@ -66,6 +66,10 @@ def calc_achievement_rate(
 def qualitative_to_score(level: str) -> float:
     """定性评级 → 达成率分数"""
     mapping = {
+        "not_started": 0.0,
+        "in_progress": 50.0,
+        "completed": 100.0,
+        "exceeded": 100.0,
         "优秀": 100.0,
         "良好": 80.0,
         "合格": 60.0,
@@ -110,12 +114,14 @@ def calculate_d_stage(indicators: List[Dict], actuals: Dict[str, Any]) -> Dict:
 
     for ind in indicators:
         name = ind["name"]
+        indicator_id = ind.get("indicator_id") or ind.get("id")
+        indicator_key = indicator_id or name
         ind_type = ind["type"]
         target = ind.get("target", 0)
         weight = ind.get("weight", 0)
         is_redline = ind.get("is_redline", False)
 
-        actual_raw = actuals.get(name)
+        actual_raw = actuals.get(indicator_key)
         if actual_raw is None:
             actual_raw = 0
 
@@ -143,6 +149,7 @@ def calculate_d_stage(indicators: List[Dict], actuals: Dict[str, Any]) -> Dict:
         status = get_indicator_status(rate, is_redline, ind_redline_triggered)
 
         result = {
+            "indicator_id": indicator_id,
             "name": name,
             "type": ind_type,
             "target": target,
@@ -219,18 +226,24 @@ def calculate_c_stage(
 
     for result in indicator_results:
         name = result["name"]
+        indicator_id = result.get("indicator_id") or result.get("id")
+        indicator_key = indicator_id or name
         weight = result.get("weight", 0)
         is_redline = result.get("is_redline", False)
 
         if is_redline:
             continue  # 红线不参与正式评分，单独扣分
 
-        score = supervisor_scores.get(name, result.get("achievement_rate", 0))
+        score = supervisor_scores.get(
+            indicator_key,
+            result.get("achievement_rate", 0),
+        )
         score = min(100.0, max(0.0, float(score)))
         weighted_score = score * weight / 100.0
         total_score += weighted_score
 
         indicator_scores.append({
+            "indicator_id": indicator_id,
             "name": name,
             "weight": weight,
             "score": round(score, 1),

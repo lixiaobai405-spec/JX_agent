@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.exceptions import UserAccessDeniedError, UserNotFoundError
@@ -16,6 +16,15 @@ STATUS_FLOW = {
     PeriodStatus.closed: [PeriodStatus.open, PeriodStatus.archived],
     PeriodStatus.archived: [PeriodStatus.closed],
 }
+
+EDITABLE_PERIOD_FIELDS = frozenset({"name", "start_date", "end_date"})
+EDITABLE_PERIOD_STATUSES = frozenset({PeriodStatus.draft, PeriodStatus.open})
+
+
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 async def _get_subordinate_ids(db: AsyncSession, manager_id: str) -> list[str]:
@@ -36,7 +45,7 @@ async def _get_subordinate_ids(db: AsyncSession, manager_id: str) -> list[str]:
             User.deleted_at.is_(None),
         )
     )
-    subordinate_ids = direct_reports.union_all(descendants)
+    subordinate_ids = direct_reports.union(descendants)
     result = await db.execute(select(subordinate_ids.c.id))
     return list(result.scalars().all())
 
@@ -274,17 +283,79 @@ async def get_current_period(db: AsyncSession, user_id: str) -> Period | None:
     return result.scalars().first()
 
 
-async def update_period(db: AsyncSession, current_user: User, period_id: str, data: dict) -> Period:
-    from core.exceptions import PermissionDeniedError
+async def _get_period_for_update(db: AsyncSession, period_id: str) -> Period:
+    from core.exceptions import PeriodNotFoundError
 
-    if current_user.role not in (UserRole.manager, UserRole.hr_admin, UserRole.system_admin):
+    dialect_name = db.get_bind().dialect.name
+    if dialect_name == "sqlite":
+        # Authentication may have opened a read transaction before this service runs.
+        if db.in_transaction():
+            if db.new or db.dirty or db.deleted:
+                raise RuntimeError(
+                    "Cannot acquire the period write lock with pending session changes"
+                )
+            await db.commit()
+        await db.execute(text("BEGIN IMMEDIATE"))
+        query = select(Period).where(
+            Period.id == period_id,
+            Period.deleted_at.is_(None),
+        )
+    else:
+        query = (
+            select(Period)
+            .where(
+                Period.id == period_id,
+                Period.deleted_at.is_(None),
+            )
+            .with_for_update()
+        )
+
+    result = await db.execute(query.execution_options(populate_existing=True))
+    period = result.scalar_one_or_none()
+    if period is None:
+        raise PeriodNotFoundError()
+    return period
+
+
+async def update_period(db: AsyncSession, current_user: User, period_id: str, data: dict) -> Period:
+    from core.exceptions import (
+        PeriodDateConflictError,
+        PeriodStatusTransitionError,
+        PermissionDeniedError,
+    )
+
+    current_user_id = current_user.id
+    current_user_role = current_user.role
+
+    if current_user_role not in (UserRole.manager, UserRole.hr_admin, UserRole.system_admin):
         raise PermissionDeniedError("Only managers and admins can update periods")
 
-    period = await get_period(db, period_id)
+    period = await _get_period_for_update(db, period_id)
 
-    for key, value in data.items():
-        if value is not None:
-            setattr(period, key, value)
+    if current_user_role == UserRole.manager:
+        subordinate_ids = await _get_subordinate_ids(db, current_user_id)
+        if period.user_id not in subordinate_ids and period.user_id != current_user_id:
+            raise PermissionDeniedError(
+                "Managers can only update periods for themselves or their subordinates"
+            )
+
+    if period.status not in EDITABLE_PERIOD_STATUSES:
+        raise PeriodStatusTransitionError("Only draft or open periods can be updated")
+
+    unexpected_fields = data.keys() - EDITABLE_PERIOD_FIELDS
+    if unexpected_fields:
+        raise PeriodStatusTransitionError(
+            "Only name, start_date, and end_date can be updated"
+        )
+
+    updates = {key: value for key, value in data.items() if value is not None}
+    merged_start_date = updates.get("start_date", period.start_date)
+    merged_end_date = updates.get("end_date", period.end_date)
+    if _as_utc(merged_start_date) >= _as_utc(merged_end_date):
+        raise PeriodDateConflictError("end_date must be after start_date")
+
+    for key, value in updates.items():
+        setattr(period, key, value)
 
     await db.commit()
     await db.refresh(period)
@@ -292,17 +363,24 @@ async def update_period(db: AsyncSession, current_user: User, period_id: str, da
 
 
 async def update_period_status(db: AsyncSession, current_user: User, period_id: str, new_status: PeriodStatus) -> Period:
-    from core.exceptions import PermissionDeniedError, PeriodStatusTransitionError, PeriodDateConflictError
+    from core.exceptions import (
+        PermissionDeniedError,
+        PeriodDateConflictError,
+        PeriodStatusTransitionError,
+        UserNotFoundError,
+    )
 
-    if current_user.role not in (UserRole.manager, UserRole.system_admin):
+    current_user_id = current_user.id
+    current_user_role = current_user.role
+    if current_user_role not in (UserRole.manager, UserRole.system_admin):
         raise PermissionDeniedError("Only managers and system admins can change period status")
 
-    period = await get_period(db, period_id)
+    period = await _get_period_for_update(db, period_id)
 
     # Managers can only change periods belonging to themselves or their subordinates.
-    if current_user.role == UserRole.manager:
-        subordinate_ids = await _get_subordinate_ids(db, current_user.id)
-        allowed_ids = subordinate_ids + [current_user.id]
+    if current_user_role == UserRole.manager:
+        subordinate_ids = await _get_subordinate_ids(db, current_user_id)
+        allowed_ids = subordinate_ids + [current_user_id]
         if period.user_id not in allowed_ids:
             raise PermissionDeniedError("Managers can only change periods for themselves or their subordinates")
 
@@ -310,6 +388,17 @@ async def update_period_status(db: AsyncSession, current_user: User, period_id: 
         raise PeriodStatusTransitionError(f"Cannot transition from {period.status.value} to {new_status.value}")
 
     if new_status == PeriodStatus.open:
+        owner_result = await db.execute(
+            select(User.id)
+            .where(
+                User.id == period.user_id,
+                User.status == UserStatus.active,
+                User.deleted_at.is_(None),
+            )
+            .with_for_update()
+        )
+        if owner_result.scalar_one_or_none() is None:
+            raise UserNotFoundError()
         existing = await db.execute(
             select(Period).where(
                 and_(Period.user_id == period.user_id, Period.status == PeriodStatus.open, Period.id != period_id, Period.deleted_at.is_(None))

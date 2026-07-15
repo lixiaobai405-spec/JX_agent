@@ -8,12 +8,16 @@ import type {
   Indicator,
   DiagnosticReport,
   DataCheckin,
+  CheckinValue,
   CoachingRequest,
+  JobAnalysis,
+  PerformanceContract,
 } from '@/types'
+import type { ContractTargetsPayload } from '@/lib/planContract'
 
 export const periodsApi = {
-  list: () => client.get<{ items: Period[] | null }>('/periods/').then((r) => normalizeList<Period>(r.data.items)),
-  listByStatus: (status: string) => client.get<{ items: Period[] | null }>('/periods/', { params: { status } }).then((r) => normalizeList<Period>(r.data.items)),
+  list: () => client.get<{ items: Period[] | null }>('/periods/', { params: { limit: 100 } }).then((r) => normalizeList<Period>(r.data.items)),
+  listByStatus: (status: string) => client.get<{ items: Period[] | null }>('/periods/', { params: { status, limit: 100 } }).then((r) => normalizeList<Period>(r.data.items)),
   current: () => client.get<Period>('/periods/current').then((r) => r.data),
   history: (user_id: string, page: number, limit: number) =>
     client.get<PeriodHistoryResponse>('/periods/history', { params: { user_id, page, limit } }).then((r) => r.data),
@@ -22,22 +26,27 @@ export const periodsApi = {
     client.put<Period>(`/periods/${id}/status`, { status }).then((r) => r.data),
   completeDPhase: (id: string) =>
     client.post<Period>(`/periods/${id}/complete-d-phase`).then((r) => r.data),
+  update: (id: string, data: Pick<Partial<Period>, 'name' | 'start_date' | 'end_date'>) =>
+    client.put<Period>(`/periods/${id}`, data).then((r) => r.data),
 }
 
 export const planApi = {
   analyzeJob: (user_id: string, jd_text: string) =>
-    client.post('/plan/job-analysis', { user_id, jd_text }).then((r) => r.data),
+    client.post<JobAnalysis>('/plan/job-analysis', { user_id, jd_text }).then((r) => r.data),
 
-  getAnalysis: (id: string) => client.get(`/plan/job-analysis/${id}`).then((r) => r.data),
+  getAnalysis: (id: string) => client.get<JobAnalysis>(`/plan/job-analysis/${id}`).then((r) => r.data),
 
   generateContract: (data: {
     period_id: string
     user_id: string
     job_analysis_id: string
     feedback?: string
-  }) => client.post('/plan/contracts/generate', data).then((r) => r.data),
+  }) => client.post<PerformanceContract>('/plan/contracts/generate', data).then((r) => r.data),
 
-  getContract: (id: string) => client.get(`/plan/contracts/${id}`).then((r) => r.data),
+  getContract: (id: string) => client.get<PerformanceContract>(`/plan/contracts/${id}`).then((r) => r.data),
+
+  updateTargets: (id: string, data: ContractTargetsPayload) =>
+    client.put<PerformanceContract>(`/plan/contracts/${id}/targets`, data).then((r) => r.data),
 
   confirmContract: (id: string, confirmed_by: string) =>
     client.post(`/plan/contracts/${id}/confirm`, { confirmed_by }).then((r) => r.data),
@@ -53,7 +62,7 @@ export const doApi = {
   indicators: (goal_id: string) =>
     client.get<Indicator[]>(`/do/goals/${goal_id}/indicators`).then((r) => r.data),
 
-  submitCheckin: (data: { indicator_id: string; actual_value: number; progress_description?: string; issues?: string }) =>
+  submitCheckin: (data: { indicator_id: string; actual_value: CheckinValue; progress_description?: string; issues?: string }) =>
     client.post<DataCheckin>('/do/checkins', data).then((r) => r.data),
 
   updateCheckin: (id: string, data: Partial<DataCheckin>) =>

@@ -20,7 +20,7 @@ async def get_current_goal(
     target_id = current_user.id
     if user_id and current_user.role in (UserRole.manager, UserRole.hr_admin, UserRole.system_admin):
         target_id = user_id
-    return await service.get_goal_by_user(db, target_id, period_id)
+    return await service.get_goal_by_user(db, current_user, target_id, period_id)
 
 
 @router.get("/goals/{goal_id}/indicators", response_model=list[schemas.IndicatorResponse])
@@ -29,7 +29,7 @@ async def list_goal_indicators(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_active_user),
 ):
-    return await service.list_goal_indicators(db, goal_id)
+    return await service.list_goal_indicators(db, current_user, goal_id)
 
 
 # Data Checkins
@@ -39,7 +39,14 @@ async def submit_checkin(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_active_user),
 ):
-    return await service.submit_checkin(db, current_user, data.indicator_id, data.actual_value, data.progress_description, data.issues)
+    return await service.submit_checkin(
+        db,
+        current_user,
+        data.indicator_id,
+        data.actual_value.model_dump(),
+        data.progress_description,
+        data.issues,
+    )
 
 
 @router.get("/checkins/{checkin_id}", response_model=schemas.DataCheckinResponse)
@@ -48,7 +55,7 @@ async def get_checkin(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_active_user),
 ):
-    return await service.get_checkin(db, checkin_id)
+    return await service.get_checkin(db, current_user, checkin_id)
 
 
 @router.put("/checkins/{checkin_id}", response_model=schemas.DataCheckinResponse)
@@ -58,7 +65,15 @@ async def update_checkin(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_active_user),
 ):
-    return await service.update_checkin(db, checkin_id, data.actual_value, data.progress_description, data.issues)
+    actual_value = data.actual_value.model_dump() if data.actual_value else None
+    return await service.update_checkin(
+        db,
+        current_user,
+        checkin_id,
+        actual_value,
+        data.progress_description,
+        data.issues,
+    )
 
 
 @router.get("/checkins/indicator/{indicator_id}", response_model=list[schemas.DataCheckinResponse])
@@ -67,7 +82,7 @@ async def list_indicator_checkins(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_active_user),
 ):
-    return await service.list_indicator_checkins(db, indicator_id)
+    return await service.list_indicator_checkins(db, current_user, indicator_id)
 
 
 # Diagnostic Reports
@@ -86,7 +101,7 @@ async def get_diagnostic_report(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_active_user),
 ):
-    return await service.get_diagnostic_report(db, report_id)
+    return await service.get_diagnostic_report(db, current_user, report_id)
 
 
 @router.get("/diagnostic-reports/goal/{goal_id}", response_model=list[schemas.DiagnosticReportResponse])
@@ -95,7 +110,7 @@ async def list_goal_reports(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_active_user),
 ):
-    return await service.list_goal_reports(db, goal_id)
+    return await service.list_goal_reports(db, current_user, goal_id)
 
 
 @router.get("/diagnostic-reports/goal/{goal_id}/latest", response_model=schemas.DiagnosticReportResponse | None)
@@ -104,7 +119,7 @@ async def get_latest_report(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_active_user),
 ):
-    return await service.get_latest_report(db, goal_id)
+    return await service.get_latest_report(db, current_user, goal_id)
 
 
 # Coaching Requests
@@ -139,7 +154,7 @@ async def get_coaching_request(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_active_user),
 ):
-    return await service.get_coaching_request(db, request_id)
+    return await service.get_coaching_request(db, current_user, request_id)
 
 
 @router.put("/coaching-requests/{request_id}/status", response_model=schemas.CoachingRequestResponse)
@@ -149,7 +164,13 @@ async def update_request_status(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_active_user),
 ):
-    return await service.update_request_status(db, request_id, data.status, data.response)
+    return await service.update_request_status(
+        db,
+        current_user,
+        request_id,
+        data.status,
+        data.response,
+    )
 
 
 

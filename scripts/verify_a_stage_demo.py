@@ -104,19 +104,20 @@ async def _ensure_plan(session, user: User, manager: User, report_id: str) -> De
     elif plan.status == DevelopmentPlanStatus.draft:
         plan = await action_service.update_development_plan(
             session,
+            user,
             plan.id,
             DEVELOPMENT_PLAN_DATA,
         )
 
-    plan = await action_service.ai_review_plan(session, plan.id)
+    plan = await action_service.ai_review_plan(session, user, plan.id)
     assert plan.ai_reviewed is True
     assert plan.smart_evaluation, "Missing SMART evaluation"
     assert plan.ai_suggestions and plan.ai_suggestions.get("overall_review"), "Missing AI overall review"
 
     if plan.status == DevelopmentPlanStatus.draft:
-        plan = await action_service.submit_plan(session, plan.id)
+        plan = await action_service.submit_plan(session, user, plan.id)
     if plan.status != DevelopmentPlanStatus.approved:
-        plan = await action_service.approve_plan(session, plan.id, current_user=manager, approved=True)
+        plan = await action_service.approve_plan(session, manager, plan.id, approved=True)
 
     assert plan.status == DevelopmentPlanStatus.approved, plan.status
     assert plan.approved_by == manager.id
@@ -192,8 +193,13 @@ async def verify_a_stage_demo() -> None:
         assert len(pending) >= 2, f"Need two pending suggestions, got {len(pending)}"
         assert all(item.suggestion_type == SuggestionType.new_indicator for item in pending[:2])
 
-        accepted = await action_service.accept_suggestion(session, pending[0].id)
-        rejected = await action_service.reject_suggestion(session, pending[1].id, "本期先聚焦销售转化，不纳入该建议")
+        accepted = await action_service.accept_suggestion(session, user, pending[0].id)
+        rejected = await action_service.reject_suggestion(
+            session,
+            user,
+            pending[1].id,
+            "本期先聚焦销售转化，不纳入该建议",
+        )
         assert accepted.status == SuggestionStatus.accepted
         assert rejected.status == SuggestionStatus.rejected
 

@@ -1,4 +1,32 @@
-export type ScoreDraftMap = Record<string, { score: string; comment?: string }>
+export type ScoreDraftMap = Record<string, { score?: string; comment?: string }>
+export type PersistedScoreMap = Record<string, { score?: number; comment?: string | null }>
+
+export function buildCompleteScoreDraft(
+  indicatorIds: string[],
+  edits: ScoreDraftMap,
+  persisted: PersistedScoreMap,
+): ScoreDraftMap {
+  return Object.fromEntries(
+    indicatorIds.map((indicatorId) => {
+      const saved = persisted[indicatorId]
+      return [
+        indicatorId,
+        {
+          score: edits[indicatorId]?.score ?? (saved?.score == null ? '' : String(saved.score)),
+          comment: edits[indicatorId]?.comment ?? saved?.comment ?? '',
+        },
+      ]
+    }),
+  )
+}
+
+export function mergeScoreDraft(
+  edits: ScoreDraftMap,
+  persisted: PersistedScoreMap,
+): ScoreDraftMap {
+  const indicatorIds = new Set([...Object.keys(persisted), ...Object.keys(edits)])
+  return buildCompleteScoreDraft([...indicatorIds], edits, persisted)
+}
 
 export function clampScore(value: number): number {
   if (!Number.isFinite(value)) return 0
@@ -21,7 +49,7 @@ export function isScoreInRange(value: string): boolean {
 }
 
 export function hasInvalidScores(items: ScoreDraftMap): boolean {
-  return Object.values(items).some((item) => !isScoreInRange(item.score))
+  return Object.values(items).some((item) => !isScoreInRange(item.score ?? ''))
 }
 
 export function toScorePayload(items: ScoreDraftMap): Record<string, { score: number; comment: string }> {
@@ -29,7 +57,7 @@ export function toScorePayload(items: ScoreDraftMap): Record<string, { score: nu
     Object.entries(items).map(([id, value]) => [
       id,
       {
-        score: clampScore(Number(value.score)),
+        score: clampScore(Number(value.score ?? '')),
         comment: value.comment ?? '',
       },
     ]),

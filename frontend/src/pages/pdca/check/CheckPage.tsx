@@ -14,7 +14,7 @@ import {
   useSelfAssessment, usePendingEvaluationTasks, useFinalResult, useGoalEvaluations, useLatestDiagnostic,
 } from '@/hooks'
 import { checkApi } from '@/api/check'
-import { hasInvalidScores, parseScoreInput, toScorePayload } from '@/lib/scores'
+import { buildCompleteScoreDraft, hasInvalidScores, mergeScoreDraft, parseScoreInput, toScorePayload } from '@/lib/scores'
 import { C_GRADE_RULES, C_GRADE_RULE_TEXT } from '@/lib/pdcaFeedback'
 import { getIndicatorReviewContext } from '@/lib/indicatorReview'
 import { TrafficLight } from '@/components/shared/TrafficLight'
@@ -64,10 +64,13 @@ export function CheckPage() {
 
   const { mutate: saveDraft, isPending: savePending } = useMutation({
     mutationFn: () => {
-      if (hasInvalidScores(items)) {
+      const draft = selfAssessment?.id
+        ? mergeScoreDraft(items, selfAssessment.items)
+        : items
+      if (hasInvalidScores(draft)) {
         throw new Error('评分必须在 0-100 之间')
       }
-      const parsed = toScorePayload(items)
+      const parsed = toScorePayload(draft)
       if (selfAssessment?.id) return checkApi.updateSelfAssessment(selfAssessment.id, parsed)
       return checkApi.createSelfAssessment(goal!.id, parsed)
     },
@@ -79,13 +82,20 @@ export function CheckPage() {
 
   const { mutate: submitSA, isPending: submitPending } = useMutation({
     mutationFn: async () => {
-      if (hasInvalidScores(items)) {
+      const completeDraft = buildCompleteScoreDraft(
+        (scorableIndicators ?? []).map((indicator) => indicator.id),
+        items,
+        selfAssessment?.items ?? {},
+      )
+      if (hasInvalidScores(completeDraft)) {
         throw new Error('评分必须在 0-100 之间')
       }
+      const payload = toScorePayload(completeDraft)
       if (!selfAssessment?.id) {
-        const created = await checkApi.createSelfAssessment(goal!.id, toScorePayload(items))
+        const created = await checkApi.createSelfAssessment(goal!.id, payload)
         return checkApi.submitSelfAssessment(created.id)
       }
+      await checkApi.updateSelfAssessment(selfAssessment.id, payload)
       return checkApi.submitSelfAssessment(selfAssessment.id)
     },
     onSuccess: () => {
@@ -110,7 +120,7 @@ export function CheckPage() {
     },
   })
 
-  const { mutate: submitEval } = useMutation({
+  const { mutate: submitEval, isPending: evalPending, variables: submittingEval } = useMutation({
     mutationFn: ({ taskId, indicatorId }: { taskId: string; indicatorId: string }) => {
       const ev = evalScores[indicatorId]
       if (!ev || !Number.isFinite(Number(ev.score)) || Number(ev.score) < 0 || Number(ev.score) > 100) {
@@ -181,12 +191,12 @@ export function CheckPage() {
 
       {finalResult && (
         <Card className="border-primary/40">
-          <CardContent className="flex items-center justify-between py-4">
+          <CardContent className="flex flex-col items-start gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex flex-col gap-0.5">
               <p className="font-medium">考核结果</p>
               {finalResult.adjustment_reason && <p className="text-xs text-muted-foreground">调整原因：{finalResult.adjustment_reason}</p>}
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               <Badge {...(GRADE_MAP[finalResult.final_grade] ?? { variant: 'secondary' as const })}>
                 {GRADE_MAP[finalResult.final_grade]?.label ?? finalResult.final_grade}
               </Badge>
@@ -254,7 +264,7 @@ export function CheckPage() {
                       <span className="text-xs text-muted-foreground">权重 {Math.round(ind.weight * 100)}%</span>
                     </Label>
                     <IndicatorReviewMeta indicator={ind} diagnostic={diagnostic} />
-                    <div className="flex gap-2">
+                    <div className="flex flex-col gap-2 sm:flex-row">
                       <Input type="number" min={0} max={100} placeholder="分数 (0-100)" className="w-36 shrink-0"
                         value={items[ind.id]?.score ?? selfAssessment?.items[ind.id]?.score ?? ''}
                         onChange={(e) => setItems((prev) => ({
@@ -265,7 +275,7 @@ export function CheckPage() {
                           },
                         }))}
                       />
-                      <Input placeholder="评价说明..."
+                      <Input className="min-w-0" placeholder="评价说明..."
                         value={items[ind.id]?.comment ?? selfAssessment?.items[ind.id]?.comment ?? ''}
                         onChange={(e) => setItems((prev) => ({ ...prev, [ind.id]: { ...prev[ind.id], comment: e.target.value } }))}
                       />
@@ -273,16 +283,19 @@ export function CheckPage() {
                   </div>
                 ))}
               </div>
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={() => saveDraft()} disabled={savePending}>保存草稿</Button>
-                <Button size="sm" onClick={() => setConfirmOpen(true)}>提交自评</Button>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" size="sm" onClick={() => saveDraft()} disabled={savePending || submitPending}>
+                  {savePending && <RefreshCw data-icon="inline-start" className="animate-spin" />}
+                  {savePending ? '保存中...' : '保存草稿'}
+                </Button>
+                <Button size="sm" onClick={() => setConfirmOpen(true)} disabled={savePending || submitPending}>提交自评</Button>
               </div>
               <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
                 <DialogContent>
                   <DialogHeader><DialogTitle>确认提交自评</DialogTitle></DialogHeader>
                   <p className="text-sm text-muted-foreground py-2">提交后无法修改，请确认评分无误。</p>
                   <div className="flex justify-end gap-2">
-                    <Button variant="outline" onClick={() => setConfirmOpen(false)}>取消</Button>
+                    <Button variant="outline" onClick={() => setConfirmOpen(false)} disabled={submitPending}>取消</Button>
                     <Button onClick={() => submitSA()} disabled={submitPending}>
                       {submitPending && <RefreshCw data-icon="inline-start" className="animate-spin" />}
                       确认提交
@@ -340,10 +353,13 @@ export function CheckPage() {
       {isManager && (
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center justify-between text-base">
+            <CardTitle className="flex flex-wrap items-center justify-between gap-2 text-base">
               上级评估
               {!pendingTasks?.length && goal && (
-                <Button variant="outline" size="sm" onClick={() => generateTasks()} disabled={genTaskPending}>生成评估任务</Button>
+                <Button variant="outline" size="sm" onClick={() => generateTasks()} disabled={genTaskPending}>
+                  {genTaskPending && <RefreshCw data-icon="inline-start" className="animate-spin" />}
+                  {genTaskPending ? '生成中...' : '生成评估任务'}
+                </Button>
               )}
             </CardTitle>
           </CardHeader>
@@ -356,7 +372,7 @@ export function CheckPage() {
                     <div key={task.id} className="flex flex-col gap-2 rounded-md border p-3">
                       <p className="text-sm font-medium">{ind?.name ?? task.indicator_id}</p>
                       {ind && <IndicatorReviewMeta indicator={ind} diagnostic={diagnostic} />}
-                      <div className="flex gap-2">
+                      <div className="flex flex-col gap-2 sm:flex-row">
                         <Input type="number" min={0} max={100} placeholder="分数 (0-100)" className="w-36 shrink-0"
                           value={evalScores[task.indicator_id]?.score ?? ''}
                           onChange={(e) => setEvalScores((prev) => ({
@@ -367,11 +383,18 @@ export function CheckPage() {
                             },
                           }))}
                         />
-                        <Input placeholder="评价意见..."
+                        <Input className="min-w-0" placeholder="评价意见..."
                           value={evalScores[task.indicator_id]?.comment ?? ''}
                           onChange={(e) => setEvalScores((prev) => ({ ...prev, [task.indicator_id]: { ...prev[task.indicator_id], comment: e.target.value } }))}
                         />
-                        <Button size="sm" onClick={() => submitEval({ taskId: task.id, indicatorId: task.indicator_id })}>提交</Button>
+                        <Button
+                          size="sm"
+                          onClick={() => submitEval({ taskId: task.id, indicatorId: task.indicator_id })}
+                          disabled={evalPending}
+                        >
+                          {evalPending && submittingEval?.taskId === task.id && <RefreshCw data-icon="inline-start" className="animate-spin" />}
+                          {evalPending && submittingEval?.taskId === task.id ? '提交中...' : '提交'}
+                        </Button>
                       </div>
                     </div>
                   )

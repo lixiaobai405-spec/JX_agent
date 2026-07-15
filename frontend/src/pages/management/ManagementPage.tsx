@@ -14,9 +14,9 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Progress } from '@/components/ui/progress'
 import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { AlertCircle, CalendarPlus, ChevronDown, ChevronRight, MessageSquare, ClipboardCheck, CheckCircle2, XCircle } from 'lucide-react'
+import { AlertCircle, CalendarPlus, ChevronDown, ChevronRight, MessageSquare, ClipboardCheck, CheckCircle2, Pencil, XCircle } from 'lucide-react'
 import {
-  useCurrentUser, useSubordinates, usePendingEvaluationTasks,
+  useCurrentUser, useSubordinates,
   useTeamCoachingRequests, useAllUsers, useTeamOpenPeriods,
   useMemberGoal, useIndicators, useLatestDiagnostic, useIndicatorCheckins,
   useSelfAssessment, useEvaluationTasks, useGoalEvaluations, useTeamPlans,
@@ -27,7 +27,12 @@ import { actionApi } from '@/api/action'
 import { usersApi } from '@/api/users'
 import { organizationsApi } from '@/api/organizations'
 import { isScoreInRange, parseScoreInput } from '@/lib/scores'
-import type { Period, CoachingRequest, Indicator, Goal } from '@/types'
+import { formatCheckinValue } from '@/lib/checkins'
+import { formatAchievementRate, toAchievementProgress } from '@/lib/performance'
+import { getDiagnosticIndicatorStatus } from '@/lib/pdcaFeedback'
+import { toDateInputValue, toPeriodEndIso, toPeriodStartIso } from '@/lib/periodDates'
+import { TrafficLight } from '@/components/shared/TrafficLight'
+import type { Period, CoachingRequest, DiagnosticReport, Indicator, Goal } from '@/types'
 
 type ApiError = {
   response?: {
@@ -96,8 +101,8 @@ function CreatePeriodDialog({ userId, userName, open, onOpenChange }: {
       const period = await periodsApi.create({
         user_id: userId,
         name: data.name,
-        start_date: new Date(data.start_date).toISOString(),
-        end_date: new Date(data.end_date + 'T23:59:59').toISOString(),
+        start_date: toPeriodStartIso(data.start_date),
+        end_date: toPeriodEndIso(data.end_date),
       })
       await periodsApi.updateStatus(period.id, 'open')
       return period
@@ -105,6 +110,8 @@ function CreatePeriodDialog({ userId, userName, open, onOpenChange }: {
     onSuccess: () => {
       toast.success('考核期已创建并开放')
       qc.invalidateQueries({ queryKey: ['periods'] })
+      qc.invalidateQueries({ queryKey: ['periods', 'open'] })
+      qc.invalidateQueries({ queryKey: ['periods', 'draft'] })
       reset()
       onOpenChange(false)
     },
@@ -130,7 +137,7 @@ function CreatePeriodDialog({ userId, userName, open, onOpenChange }: {
             <Input {...register('name')} placeholder="如：2026年7月绩效周期" />
             {errors.name && <p className="text-xs text-destructive">{errors.name.message}</p>}
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid gap-3 sm:grid-cols-2">
             <div className="flex flex-col gap-1.5">
               <Label>开始日期</Label>
               <Input type="date" {...register('start_date')} />
@@ -143,12 +150,88 @@ function CreatePeriodDialog({ userId, userName, open, onOpenChange }: {
             </div>
           </div>
           <div className="flex justify-end gap-2 pt-1">
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>取消</Button>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isPending}>取消</Button>
             <Button type="submit" disabled={isPending}>
               {isPending ? '创建中...' : '创建并开放'}
             </Button>
           </div>
         </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function EditPeriodDialog({ period, userName, open, onOpenChange }: {
+  period: Period
+  userName: string
+  open: boolean
+  onOpenChange: (value: boolean) => void
+}) {
+  const qc = useQueryClient()
+  const { register, handleSubmit, reset, formState: { errors } } = useForm<PeriodForm>({
+    resolver: zodResolver(periodSchema),
+  })
+
+  useEffect(() => {
+    if (!open) return
+    reset({
+      name: period.name,
+      start_date: toDateInputValue(period.start_date),
+      end_date: toDateInputValue(period.end_date),
+    })
+  }, [open, period, reset])
+
+  const { mutate, isPending } = useMutation({
+    mutationFn: (data: PeriodForm) => periodsApi.update(period.id, {
+      name: data.name,
+      start_date: toPeriodStartIso(data.start_date),
+      end_date: toPeriodEndIso(data.end_date),
+    }),
+    onSuccess: () => {
+      toast.success('考核期已更新')
+      qc.invalidateQueries({ queryKey: ['periods'] })
+      qc.invalidateQueries({ queryKey: ['periods', 'open'] })
+      qc.invalidateQueries({ queryKey: ['periods', 'draft'] })
+      qc.invalidateQueries({ queryKey: ['periods', 'current'] })
+      onOpenChange(false)
+    },
+  })
+
+  const canEdit = period.status === 'draft' || period.status === 'open'
+
+  return (
+    <Dialog open={open} onOpenChange={(nextOpen) => { if (!isPending) onOpenChange(nextOpen) }}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>编辑 {userName} 的考核期</DialogTitle></DialogHeader>
+        {!canEdit ? (
+          <p className="text-sm text-muted-foreground">只有草稿或进行中的考核期可以编辑。</p>
+        ) : (
+          <form onSubmit={handleSubmit((data) => mutate(data))} className="flex flex-col gap-4 pt-2">
+            <div className="flex flex-col gap-1.5">
+              <Label>考核期名称</Label>
+              <Input {...register('name')} />
+              {errors.name && <p className="text-xs text-destructive">{errors.name.message}</p>}
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="flex flex-col gap-1.5">
+                <Label>开始日期</Label>
+                <Input type="date" {...register('start_date')} />
+                {errors.start_date && <p className="text-xs text-destructive">{errors.start_date.message}</p>}
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label>结束日期</Label>
+                <Input type="date" {...register('end_date')} />
+                {errors.end_date && <p className="text-xs text-destructive">{errors.end_date.message}</p>}
+              </div>
+            </div>
+            <div className="flex flex-wrap justify-end gap-2 pt-1">
+              <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isPending}>取消</Button>
+              <Button type="submit" disabled={isPending}>
+                {isPending ? '保存中...' : '保存修改'}
+              </Button>
+            </div>
+          </form>
+        )}
       </DialogContent>
     </Dialog>
   )
@@ -287,7 +370,7 @@ function CreateUserDialog({ open, onOpenChange }: {
             <Input {...register('phone')} placeholder="手机号" />
           </div>
           <div className="flex justify-end gap-2 pt-1">
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>取消</Button>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isPending}>取消</Button>
             <Button type="submit" disabled={isPending}>
               {isPending ? '创建中...' : '创建用户'}
             </Button>
@@ -300,39 +383,31 @@ function CreateUserDialog({ open, onOpenChange }: {
 
 // ─── Indicator mini-row (inside expanded section) ─────────────────────────
 
-function indicatorTrafficColor(indicator: Indicator, actual: number | null): 'green' | 'yellow' | 'red' | null {
-  if (actual == null || indicator.target_value == null) return null
-  if (indicator.redline && actual < indicator.target_value) return 'red'
-  const ratio = indicator.direction === 'positive'
-    ? actual / indicator.target_value
-    : indicator.target_value / actual
-  if (ratio >= 0.9) return 'green'
-  if (ratio >= 0.6) return 'yellow'
-  return 'red'
-}
-
-function IndicatorMiniRow({ indicator }: { indicator: Indicator }) {
+function IndicatorMiniRow({ indicator, diagnostic }: { indicator: Indicator; diagnostic?: DiagnosticReport | null }) {
   const { data: checkins } = useIndicatorCheckins(indicator.id)
-  const actual = checkins?.[0] ? (checkins[0].actual_value as Record<string, number>).value : null
-  const pct = actual != null && indicator.target_value
-    ? Math.round((indicator.direction === 'positive'
+  const actualValue = checkins?.[0]?.actual_value
+  const actual = typeof actualValue?.value === 'number' ? actualValue.value : null
+  const actualDisplay = actualValue ? formatCheckinValue(actualValue, indicator.unit) : null
+  const pct = actual != null && indicator.target_value && !indicator.redline && indicator.indicator_type !== 'qualitative'
+    ? (indicator.direction === 'positive'
         ? actual / indicator.target_value
-        : indicator.target_value / actual) * 100)
+        : indicator.target_value / actual) * 100
     : null
-  const color = indicatorTrafficColor(indicator, actual)
-
-  const colorDot = color === 'green' ? 'bg-green-500' : color === 'yellow' ? 'bg-yellow-400' : color === 'red' ? 'bg-red-500' : 'bg-gray-300'
+  const status = getDiagnosticIndicatorStatus(diagnostic, indicator)
+  const targetDisplay = indicator.target_display ?? (
+    indicator.target_value != null ? `${indicator.target_value}${indicator.unit ?? ''}` : '—'
+  )
 
   return (
-    <div className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-x-4 py-1.5 text-sm border-b last:border-0">
-      <span className="flex items-center gap-1.5">
-        <span className={`size-2 rounded-full shrink-0 ${colorDot}`} />
-        <span>{indicator.name}</span>
+    <div className="grid gap-1 border-b py-2 text-sm last:border-0 sm:grid-cols-[minmax(0,1fr)_auto_auto_auto] sm:items-center sm:gap-x-4">
+      <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+        <span className="break-words">{indicator.name}</span>
         {indicator.redline && <Badge variant="destructive" className="text-xs py-0">否决</Badge>}
+        <TrafficLight status={status} />
       </span>
-      <span className="text-muted-foreground text-right">目标 {indicator.target_value ?? '—'}</span>
-      <span className="font-medium text-right">{actual != null ? `实际 ${actual}` : '未打卡'}</span>
-      <span className="text-right w-12">{pct != null ? `${pct}%` : '—'}</span>
+      <span className="text-muted-foreground sm:text-right">目标 {targetDisplay}</span>
+      <span className="font-medium sm:text-right">{actualDisplay ? `实际 ${actualDisplay}` : '未打卡'}</span>
+      <span className="sm:text-right">达成率 {formatAchievementRate(pct)}</span>
     </div>
   )
 }
@@ -350,7 +425,7 @@ function CoachingRequestItem({ req }: { req: CoachingRequest }) {
   const [notes, setNotes] = useState('')
   const qc = useQueryClient()
 
-  const { mutate: respond, isPending } = useMutation({
+  const { mutate: respond, isPending, variables: responseStatus } = useMutation({
     mutationFn: (status: 'accepted' | 'rejected') =>
       doApi.updateCoachingStatus(req.id, status, notes || undefined),
     onSuccess: () => {
@@ -392,9 +467,13 @@ function CoachingRequestItem({ req }: { req: CoachingRequest }) {
               className="text-xs"
             />
             <div className="flex gap-2">
-              <Button size="sm" onClick={() => respond('accepted')} disabled={isPending}>接受</Button>
-              <Button size="sm" variant="outline" onClick={() => respond('rejected')} disabled={isPending}>拒绝</Button>
-              <Button size="sm" variant="ghost" onClick={() => setResponding(false)}>取消</Button>
+              <Button size="sm" onClick={() => respond('accepted')} disabled={isPending}>
+                {isPending && responseStatus === 'accepted' ? '处理中...' : '接受'}
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => respond('rejected')} disabled={isPending}>
+                {isPending && responseStatus === 'rejected' ? '处理中...' : '拒绝'}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setResponding(false)} disabled={isPending}>取消</Button>
             </div>
           </div>
         ) : (
@@ -492,8 +571,8 @@ function EvalScoringSection({ goal, indicators: allIndicators }: { goal: Goal; i
         )}
       </div>
 
-      <div className="rounded-md border overflow-hidden">
-        <table className="w-full text-sm">
+      <div className="overflow-x-auto rounded-md border">
+        <table className="w-full min-w-[640px] text-sm">
           <thead className="bg-muted/50">
             <tr>
               <th className="text-left px-3 py-2 font-medium text-muted-foreground">指标</th>
@@ -518,7 +597,7 @@ function EvalScoringSection({ goal, indicators: allIndicators }: { goal: Goal; i
                     )}
                   </td>
                   <td className="px-3 py-2 text-center text-muted-foreground">
-                    {Math.round(ind.weight * 100)}%
+                    {formatAchievementRate(ind.weight * 100)}
                   </td>
                   <td className="px-3 py-2 text-center">
                     {selfItem != null ? (
@@ -645,11 +724,11 @@ function IDPReviewSection({ memberId, period }: { memberId: string; period: Peri
             </div>
           )}
           <div className="flex gap-2">
-            <Button size="sm" onClick={() => approve()} disabled={approvePending}>
+            <Button size="sm" onClick={() => approve()} disabled={approvePending || rejectPending}>
               <CheckCircle2 className="size-3.5 mr-1" />
               {approvePending ? '审批中...' : '同意'}
             </Button>
-            <Button size="sm" variant="outline" onClick={() => setRejectOpen(true)}>
+            <Button size="sm" variant="outline" onClick={() => setRejectOpen(true)} disabled={approvePending || rejectPending}>
               <XCircle className="size-3.5 mr-1" />
               打回修改
             </Button>
@@ -684,7 +763,7 @@ function IDPReviewSection({ memberId, period }: { memberId: string; period: Peri
             placeholder="说明需要修改的方向或不足之处..."
           />
           <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setRejectOpen(false)}>取消</Button>
+            <Button variant="outline" onClick={() => setRejectOpen(false)} disabled={rejectPending}>取消</Button>
             <Button onClick={() => reject()} disabled={rejectPending || !rejectComment.trim()}>
               {rejectPending ? '提交中...' : '确认打回'}
             </Button>
@@ -700,7 +779,7 @@ function IDPReviewSection({ memberId, period }: { memberId: string; period: Peri
             结束后该考核期将关闭，员工可在下一考核期继续。此操作不可撤销。
           </p>
           <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setClosingPeriod(false)}>取消</Button>
+            <Button variant="outline" onClick={() => setClosingPeriod(false)} disabled={closePending}>取消</Button>
             <Button variant="destructive" onClick={() => closePeriod()} disabled={closePending}>
               {closePending ? '处理中...' : '确认结束'}
             </Button>
@@ -714,7 +793,7 @@ function IDPReviewSection({ memberId, period }: { memberId: string; period: Peri
 // ─── Expanded detail for a member ─────────────────────────────────────────
 
 function MemberExpandedDetail({
-  memberId, period, allCoaching, isAdmin, canManage, onCreatePeriod,
+  memberId, period, allCoaching, isAdmin, canManage, onCreatePeriod, onEditPeriod,
 }: {
   memberId: string
   period: Period | undefined
@@ -722,6 +801,7 @@ function MemberExpandedDetail({
   isAdmin: boolean
   canManage: boolean
   onCreatePeriod: () => void
+  onEditPeriod: () => void
 }) {
   const { data: goal, isLoading: goalLoading } = useMemberGoal(period?.id, memberId)
   const { data: indicators, isLoading: indLoading } = useIndicators(goal?.id)
@@ -732,8 +812,8 @@ function MemberExpandedDetail({
 
   if (!period) {
     return (
-      <div className="px-4 py-3 text-sm text-muted-foreground flex items-center justify-between">
-        <span>暂无开放考核期</span>
+      <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm text-muted-foreground">
+        <span>暂无草稿或进行中的考核期</span>
         {isAdmin && (
           <Button variant="outline" size="sm" onClick={onCreatePeriod}>
             <CalendarPlus className="size-3.5 mr-1" />
@@ -750,12 +830,12 @@ function MemberExpandedDetail({
 
   if (!goal) {
     return (
-      <div className="px-4 py-3 text-sm text-muted-foreground flex items-center justify-between">
-        <span>考核期已开放，尚未创建绩效目标（P 阶段未完成）</span>
-        {isAdmin && (
-          <Button variant="outline" size="sm" onClick={onCreatePeriod}>
-            <CalendarPlus className="size-3.5 mr-1" />
-            重建考核期
+      <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm text-muted-foreground">
+        <span>{period.status === 'draft' ? '考核期仍为草稿，尚未确认绩效目标' : '考核期已开放，尚未创建绩效目标（P 阶段未完成）'}</span>
+        {canManage && (
+          <Button variant="outline" size="sm" onClick={onEditPeriod}>
+            <Pencil className="size-3.5 mr-1" />
+            编辑考核期
           </Button>
         )}
       </div>
@@ -767,7 +847,7 @@ function MemberExpandedDetail({
       {/* Indicators */}
       {indicators && indicators.length > 0 ? (
         <div className="rounded-md border px-3 py-1">
-          {indicators.map(ind => <IndicatorMiniRow key={ind.id} indicator={ind} />)}
+          {indicators.map(ind => <IndicatorMiniRow key={ind.id} indicator={ind} diagnostic={diagnostic} />)}
         </div>
       ) : (
         <p className="text-sm text-muted-foreground">暂无指标数据</p>
@@ -777,17 +857,17 @@ function MemberExpandedDetail({
       {diagnostic && (
         <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
           <span>
-            加权完成率：
+            加权达成率：
             <span className="font-semibold text-foreground ml-1">
-              {diagnostic.weighted_achievement_rate != null ? `${Math.round(diagnostic.weighted_achievement_rate)}%` : '—'}
+              {formatAchievementRate(diagnostic.weighted_achievement_rate)}
             </span>
           </span>
           {diagnostic.weighted_achievement_rate != null && (
-            <Progress value={diagnostic.weighted_achievement_rate} className="w-32 h-2" />
+            <Progress value={toAchievementProgress(diagnostic.weighted_achievement_rate)} className="h-2 w-32" />
           )}
           {diagnostic.progress_deviation != null && (
             <span className={diagnostic.progress_deviation < 0 ? 'text-destructive' : 'text-green-600'}>
-              进度偏差：{diagnostic.progress_deviation > 0 ? '+' : ''}{Math.round(diagnostic.progress_deviation)}%
+              进度偏差：{diagnostic.progress_deviation > 0 ? '+' : ''}{formatAchievementRate(diagnostic.progress_deviation)}
             </span>
           )}
         </div>
@@ -811,14 +891,14 @@ function MemberExpandedDetail({
 
       {/* Admin actions */}
       {(isAdmin || canManage) && (
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           {period && !period.d_phase_completed && (
             <CompleteDPhaseButton periodId={period.id} />
           )}
-          {isAdmin && (
-            <Button size="sm" variant="ghost" onClick={onCreatePeriod}>
-              <CalendarPlus className="size-3.5 mr-1" />
-              新建考核期
+          {canManage && (period.status === 'draft' || period.status === 'open') && (
+            <Button size="sm" variant="ghost" onClick={onEditPeriod}>
+              <Pencil className="size-3.5 mr-1" />
+              编辑考核期
             </Button>
           )}
         </div>
@@ -830,7 +910,7 @@ function MemberExpandedDetail({
 // ─── Single member card row ────────────────────────────────────────────────
 
 function MemberCard({
-  member, period, pendingCoaching, allCoaching, isAdmin, canManage, onCreatePeriod,
+  member, period, pendingCoaching, allCoaching, isAdmin, canManage, onCreatePeriod, onEditPeriod,
 }: {
   member: { id: string; full_name: string; username: string; position_name?: string; department_name?: string; is_direct?: boolean; level?: number; role?: string }
   period: Period | undefined
@@ -839,6 +919,7 @@ function MemberCard({
   isAdmin: boolean
   canManage: boolean
   onCreatePeriod: () => void
+  onEditPeriod: () => void
 }) {
   const [expanded, setExpanded] = useState(false)
   const navigate = useNavigate()
@@ -846,45 +927,60 @@ function MemberCard({
   return (
     <div className="rounded-lg border bg-card">
       {/* Row header */}
-      <button
-        className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-muted/40 transition-colors rounded-lg"
-        onClick={() => setExpanded(v => !v)}
-      >
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-medium text-sm">{member.full_name}</span>
-            {member.is_direct && <Badge variant="secondary" className="text-xs">直属</Badge>}
-            {member.position_name && <span className="text-xs text-muted-foreground">{member.position_name}</span>}
-            {member.department_name && <span className="text-xs text-muted-foreground">· {member.department_name}</span>}
+      <div className="flex flex-col sm:flex-row sm:items-stretch">
+        <button
+          type="button"
+          className="flex min-w-0 flex-1 items-center gap-3 rounded-lg px-4 py-3 text-left transition-colors hover:bg-muted/40"
+          onClick={() => setExpanded(v => !v)}
+          aria-expanded={expanded}
+        >
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="break-words text-sm font-medium">{member.full_name}</span>
+              {member.is_direct && <Badge variant="secondary" className="text-xs">直属</Badge>}
+              {member.position_name && <span className="text-xs text-muted-foreground">{member.position_name}</span>}
+              {member.department_name && <span className="text-xs text-muted-foreground">· {member.department_name}</span>}
+            </div>
+            <div className="mt-0.5 flex flex-wrap items-center gap-2">
+              {period
+                ? <Badge variant="outline" className="max-w-full text-xs">{period.status === 'draft' ? '草稿' : '考核中'} · <span className="truncate">{period.name}</span></Badge>
+                : <Badge variant="outline" className="text-xs text-muted-foreground">无考核期</Badge>
+              }
+              {pendingCoaching.length > 0 && (
+                <Badge variant="destructive" className="text-xs">辅导 {pendingCoaching.length}</Badge>
+              )}
+              {isAdmin && member.role && (
+                <Badge variant="outline" className="text-xs">{member.role}</Badge>
+              )}
+              {!isAdmin && member.level != null && (
+                <Badge variant="outline" className="text-xs">L{member.level + 1}</Badge>
+              )}
+            </div>
           </div>
-          <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-            {period
-              ? <Badge variant="outline" className="text-xs">考核中 · {period.name}</Badge>
-              : <Badge variant="outline" className="text-xs text-muted-foreground">无考核期</Badge>
-            }
-            {pendingCoaching.length > 0 && (
-              <Badge variant="destructive" className="text-xs">辅导 {pendingCoaching.length}</Badge>
-            )}
-            {isAdmin && member.role && (
-              <Badge variant="outline" className="text-xs">{member.role}</Badge>
-            )}
-            {!isAdmin && member.level != null && (
-              <Badge variant="outline" className="text-xs">L{member.level + 1}</Badge>
-            )}
-          </div>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
+          {expanded ? <ChevronDown className="size-4 shrink-0 text-muted-foreground" /> : <ChevronRight className="size-4 shrink-0 text-muted-foreground" />}
+        </button>
+        <div className="flex shrink-0 items-center justify-end gap-1 px-3 pb-3 sm:py-3">
+          {period && canManage && (period.status === 'draft' || period.status === 'open') && (
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={`编辑 ${member.full_name} 的考核期`}
+              title="编辑考核期"
+              onClick={onEditPeriod}
+            >
+              <Pencil />
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="sm"
             className="h-7 text-xs"
-            onClick={(e) => { e.stopPropagation(); navigate(`/management/team/${member.id}`) }}
+            onClick={() => navigate(`/management/team/${member.id}`)}
           >
             详情
           </Button>
-          {expanded ? <ChevronDown className="size-4 text-muted-foreground" /> : <ChevronRight className="size-4 text-muted-foreground" />}
         </div>
-      </button>
+      </div>
 
       {/* Expanded detail */}
       {expanded && (
@@ -896,6 +992,7 @@ function MemberCard({
             isAdmin={isAdmin}
             canManage={canManage}
             onCreatePeriod={onCreatePeriod}
+            onEditPeriod={onEditPeriod}
           />
         </div>
       )}
@@ -917,14 +1014,25 @@ export function ManagementPage() {
   )
   const isLoading = isAdmin ? usersLoading : subLoading
 
-  const { data: teamPeriods } = useTeamOpenPeriods()
-  const { data: pendingEvals } = usePendingEvaluationTasks()
+  const { data: openTeamPeriods } = useTeamOpenPeriods()
+  const { data: draftTeamPeriods } = useQuery({
+    queryKey: ['periods', 'draft'],
+    queryFn: () => periodsApi.listByStatus('draft'),
+  })
+  const { data: pendingEvalSummary } = useQuery({
+    queryKey: ['eval-tasks', 'pending-count'],
+    queryFn: checkApi.pendingEvaluationTaskCount,
+    refetchInterval: 5000,
+    refetchIntervalInBackground: false,
+  })
   const { data: coachingRequests } = useTeamCoachingRequests()
 
   const [search, setSearch] = useState('')
   const [directOnly, setDirectOnly] = useState(false)
   const [createTarget, setCreateTarget] = useState<{ id: string; name: string } | null>(null)
+  const [editTarget, setEditTarget] = useState<{ period: Period; userName: string } | null>(null)
   const [createUserOpen, setCreateUserOpen] = useState(false)
+  const teamPeriods = [...(openTeamPeriods ?? []), ...(draftTeamPeriods ?? [])]
 
   const members: Array<{ id: string; full_name: string; username: string; position_name?: string; department_name?: string; is_direct?: boolean; level?: number; role?: string }> = isAdmin
     ? (allUsers ?? []).map((u) => ({
@@ -951,7 +1059,7 @@ export function ManagementPage() {
       (m.full_name.includes(search) || m.username.includes(search))
   )
 
-  const pendingEvalCount = pendingEvals?.length ?? 0
+  const pendingEvalCount = pendingEvalSummary?.count ?? 0
   const pendingCoachingCount = (coachingRequests ?? []).filter((r) => r.status === 'pending').length
   const hasTodos = pendingEvalCount + pendingCoachingCount > 0
 
@@ -969,7 +1077,7 @@ export function ManagementPage() {
           <AlertCircle className="size-4" />
           <AlertDescription className="flex flex-wrap gap-3">
             {pendingEvalCount > 0 && (
-              <span>{pendingEvalCount} 人等待评分</span>
+              <span>{pendingEvalCount} 人等待我评分</span>
             )}
             {pendingCoachingCount > 0 && (
               <span>{pendingCoachingCount} 条辅导请求待处理</span>
@@ -978,8 +1086,8 @@ export function ManagementPage() {
         </Alert>
       )}
 
-      <div className="flex items-center gap-3">
-        <Input placeholder="搜索成员..." value={search} onChange={(e) => setSearch(e.target.value)} className="w-56" />
+      <div className="flex flex-wrap items-center gap-3">
+        <Input placeholder="搜索成员..." value={search} onChange={(e) => setSearch(e.target.value)} className="w-full sm:w-56" />
         {!isAdmin && (
           <Button variant={directOnly ? 'default' : 'outline'} size="sm" onClick={() => setDirectOnly((v) => !v)}>
             {directOnly ? '直属' : '全部下属'}
@@ -1019,6 +1127,7 @@ export function ManagementPage() {
                 isAdmin={isAdmin}
                 canManage={isAdmin || currentUser?.role === 'manager'}
                 onCreatePeriod={() => setCreateTarget({ id: member.id, name: member.full_name })}
+                onEditPeriod={() => period && setEditTarget({ period, userName: member.full_name })}
               />
             )
           })}
@@ -1031,6 +1140,14 @@ export function ManagementPage() {
           userName={createTarget.name}
           open={!!createTarget}
           onOpenChange={(v) => { if (!v) setCreateTarget(null) }}
+        />
+      )}
+      {editTarget && (
+        <EditPeriodDialog
+          period={editTarget.period}
+          userName={editTarget.userName}
+          open={!!editTarget}
+          onOpenChange={(nextOpen) => { if (!nextOpen) setEditTarget(null) }}
         />
       )}
       <CreateUserDialog open={createUserOpen} onOpenChange={setCreateUserOpen} />

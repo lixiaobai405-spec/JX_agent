@@ -1,20 +1,31 @@
 import assert from 'node:assert/strict'
 
 import {
+  C_GRADE_RULES,
   C_GRADE_RULE_TEXT,
   getDiagnosticIndicatorStatus,
   getPlanText,
   getSuggestionSummary,
 } from '../src/lib/pdcaFeedback.ts'
 
-assert.equal(C_GRADE_RULE_TEXT.includes('S 90-100'), true)
+assert.deepEqual(
+  C_GRADE_RULES.map(({ grade, range }) => ({ grade, range })),
+  [
+    { grade: 'S', range: '[90, 100]' },
+    { grade: 'A', range: '[80, 90)' },
+    { grade: 'B', range: '[70, 80)' },
+    { grade: 'C', range: '[0, 70)' },
+  ],
+)
+assert.equal(C_GRADE_RULE_TEXT.includes('A 为 [80, 90)'), true)
 
 const diagnostic = {
   indicators_analysis: {
     indicator_results: [
-      { name: '铺货率', status: 'green' },
+      { indicator_id: 'indicator-1', name: '已改名的铺货率', status: 'green' },
       { indicator_id: 'indicator-2', status: 'yellow' },
-      { indicator_name: '事故次数', status: 'red' },
+      { indicator_id: 'indicator-3', indicator_name: '事故次数', status: 'red' },
+      { name: '仅同名指标', status: 'green' },
     ],
   },
 }
@@ -32,7 +43,14 @@ assert.equal(
   'red',
 )
 assert.equal(
-  getDiagnosticIndicatorStatus(diagnostic as never, { id: 'indicator-4', name: '未知指标' }),
+  getDiagnosticIndicatorStatus(diagnostic as never, { id: 'indicator-4', name: '仅同名指标' }),
+  'green',
+)
+assert.equal(
+  getDiagnosticIndicatorStatus(
+    { indicators_analysis: { indicator_results: [{ indicator_id: 'other-id', name: '同名不同指标', status: 'red' }] } } as never,
+    { id: 'indicator-5', name: '同名不同指标' },
+  ),
   null,
 )
 

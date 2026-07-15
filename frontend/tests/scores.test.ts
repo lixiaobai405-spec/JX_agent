@@ -5,6 +5,8 @@ import {
   parseScoreInput,
   isScoreInRange,
   hasInvalidScores,
+  buildCompleteScoreDraft,
+  mergeScoreDraft,
 } from '../src/lib/scores.ts'
 
 assert.equal(clampScore(-1), 0)
@@ -29,5 +31,47 @@ assert.equal(isScoreInRange('abc'), false)
 assert.equal(hasInvalidScores({ a: { score: '90' }, b: { score: '100' } }), false)
 assert.equal(hasInvalidScores({ a: { score: '90' }, b: { score: '101' } }), true)
 assert.equal(hasInvalidScores({ a: { score: '' } }), true)
+
+assert.deepEqual(
+  buildCompleteScoreDraft(
+    ['indicator-1', 'indicator-2'],
+    { 'indicator-1': { score: '95', comment: 'edited' } },
+    {
+      'indicator-1': { score: 80, comment: 'old' },
+      'indicator-2': { score: 70, comment: 'saved' },
+    },
+  ),
+  {
+    'indicator-1': { score: '95', comment: 'edited' },
+    'indicator-2': { score: '70', comment: 'saved' },
+  },
+)
+
+assert.deepEqual(
+  buildCompleteScoreDraft(['indicator-1'], {}, {}),
+  { 'indicator-1': { score: '', comment: '' } },
+)
+
+assert.deepEqual(
+  mergeScoreDraft(
+    { 'indicator-1': { score: '95', comment: 'edited' } },
+    {
+      'indicator-1': { score: 80, comment: 'old' },
+      'indicator-2': { score: 70, comment: 'saved' },
+    },
+  ),
+  {
+    'indicator-1': { score: '95', comment: 'edited' },
+    'indicator-2': { score: '70', comment: 'saved' },
+  },
+)
+
+assert.deepEqual(
+  mergeScoreDraft(
+    { 'indicator-1': { comment: 'comment only' } },
+    { 'indicator-1': { score: 80, comment: 'old' } },
+  ),
+  { 'indicator-1': { score: '80', comment: 'comment only' } },
+)
 
 console.log('scores tests passed')

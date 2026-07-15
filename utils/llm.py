@@ -2,6 +2,7 @@
 LLM Client with retry and validation decorator.
 Copied from REUSABLE_MODULES.md
 """
+import asyncio
 import os
 import json
 import logging
@@ -15,6 +16,42 @@ from dotenv import load_dotenv
 load_dotenv()
 logger = logging.getLogger(__name__)
 T = TypeVar('T', bound=BaseModel)
+
+DEFAULT_LLM_TIMEOUT_SECONDS = 60.0
+DEFAULT_LLM_MAX_ATTEMPTS = 1
+MAX_LLM_ATTEMPTS = 3
+
+
+async def run_sync_llm(
+    func: Callable,
+    *args,
+    timeout_seconds: float = DEFAULT_LLM_TIMEOUT_SECONDS,
+    max_attempts: int = DEFAULT_LLM_MAX_ATTEMPTS,
+    **kwargs,
+):
+    """Run a synchronous LLM call off the event loop with bounded retries."""
+    if timeout_seconds <= 0:
+        raise ValueError("timeout_seconds must be positive")
+
+    attempts = max(1, min(max_attempts, MAX_LLM_ATTEMPTS))
+    last_error: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return await asyncio.wait_for(
+                asyncio.to_thread(func, *args, **kwargs),
+                timeout=timeout_seconds,
+            )
+        except TimeoutError as exc:
+            last_error = TimeoutError(
+                f"LLM call timed out after {timeout_seconds:g} seconds "
+                f"(attempt {attempt}/{attempts})"
+            )
+            last_error.__cause__ = exc
+        except Exception as exc:
+            last_error = exc
+
+    assert last_error is not None
+    raise last_error
 
 
 class TokenStats:
@@ -57,7 +94,12 @@ class LLMClient:
         if not self.api_key:
             raise ValueError("OPENAI_API_KEY environment variable is not set")
 
-        self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
+        self.client = OpenAI(
+            api_key=self.api_key,
+            base_url=self.base_url,
+            timeout=DEFAULT_LLM_TIMEOUT_SECONDS,
+            max_retries=0,
+        )
         logger.info(f"LLM Client initialized with model: {self.model}")
 
     def call_stream(
@@ -146,12 +188,22 @@ def retry_and_validate(
                         "message": f"AI 正在生成第 {attempt} 份结果以提高质量..."
                     })
 
-                if use_stream and ui_callback:
-                    def token_callback(stats):
-                        ui_callback({"type": "token_update", **stats})
-                    response_text = llm_client.call_stream(prompt, system_prompt, callback=token_callback)
-                else:
-                    response_text = llm_client.call_stream(prompt, system_prompt)
+                try:
+                    if use_stream and ui_callback:
+                        def token_callback(stats):
+                            ui_callback({"type": "token_update", **stats})
+                        response_text = llm_client.call_stream(prompt, system_prompt, callback=token_callback)
+                    else:
+                        response_text = llm_client.call_stream(prompt, system_prompt)
+                except Exception as e:
+                    error_msg = f"LLM request failed: {e}"
+                    logger.warning(error_msg)
+                    last_error = error_msg
+                    if attempt < max_attempts:
+                        continue
+                    raise Exception(
+                        f"LLM request failed after {max_attempts} attempts: {e}"
+                    ) from e
 
                 try:
                     json_text = response_text.strip()

@@ -1,5 +1,8 @@
+import math
 from datetime import datetime
-from pydantic import BaseModel
+from typing import Annotated, Literal
+
+from pydantic import BaseModel, Field, StrictFloat, StrictInt, field_validator
 
 
 # Goal and Indicator Schemas
@@ -35,17 +38,55 @@ class IndicatorResponse(BaseModel):
 
 
 # Data Checkin Schemas
+class QuantitativeCheckinValue(BaseModel):
+    value_type: Literal["quantitative"]
+    value: StrictInt | StrictFloat
+
+    model_config = {"extra": "forbid"}
+
+    @field_validator("value")
+    @classmethod
+    def value_must_be_finite(cls, value: int | float) -> int | float:
+        if not math.isfinite(value):
+            raise ValueError("quantitative value must be finite")
+        return value
+
+
+class QualitativeCheckinValue(BaseModel):
+    value_type: Literal["qualitative"]
+    value: Literal["not_started", "in_progress", "completed", "exceeded"]
+
+    model_config = {"extra": "forbid"}
+
+
+class RedlineCheckinValue(BaseModel):
+    value_type: Literal["redline"]
+    value: Annotated[StrictInt, Field(ge=0)]
+
+    model_config = {"extra": "forbid"}
+
+
+DataCheckinValue = Annotated[
+    QuantitativeCheckinValue | QualitativeCheckinValue | RedlineCheckinValue,
+    Field(discriminator="value_type"),
+]
+
+
 class DataCheckinCreate(BaseModel):
     indicator_id: str
-    actual_value: float
+    actual_value: DataCheckinValue
     progress_description: str | None = None
     issues: str | None = None
+
+    model_config = {"extra": "forbid"}
 
 
 class DataCheckinUpdate(BaseModel):
-    actual_value: float | None = None
+    actual_value: DataCheckinValue | None = None
     progress_description: str | None = None
     issues: str | None = None
+
+    model_config = {"extra": "forbid"}
 
 
 class DataCheckinResponse(BaseModel):

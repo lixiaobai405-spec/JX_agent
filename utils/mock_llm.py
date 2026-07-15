@@ -273,10 +273,10 @@ class MockLLMClient:
         if "归类" in prompt or "position_type" in prompt or "classify" in prompt.lower():
             return json.dumps(MOCK_CLASSIFICATIONS[_case_code(prompt)], ensure_ascii=False)
 
-        if "SMART" in prompt or "计划" in prompt:
+        if "smart_evaluation" in prompt or "polished_goals" in prompt:
             return json.dumps(MOCK_PLAN_REVIEW, ensure_ascii=False)
 
-        if "review" in prompt.lower() or "复盘" in prompt or "ReviewReport" in prompt:
+        if "overall_summary" in prompt and "development_areas" in prompt:
             return json.dumps(MOCK_REVIEW_REPORT, ensure_ascii=False)
 
         if "结果确认单" in prompt or "result_sheet" in prompt.lower():

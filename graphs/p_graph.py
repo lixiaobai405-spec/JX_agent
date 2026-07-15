@@ -2,10 +2,11 @@
 P 阶段 LangGraph — 智能定标
 节点：classify_node → generate_indicators_node → END
 """
+import json
 from typing import List, Literal, Optional, TypedDict
 from pydantic import BaseModel
 from langgraph.graph import StateGraph, END
-from utils.llm import retry_and_validate, call_llm_simple
+from utils.llm import retry_and_validate, run_sync_llm
 from sqlalchemy.ext.asyncio import AsyncSession
 from graphs.db_helper import get_prototype_config
 
@@ -34,6 +35,7 @@ class Indicator(BaseModel):
     weight: int
     scoring_rule: str
     is_redline: bool
+    source_suggestion_id: Optional[str] = None
 
 
 class PStageResult(BaseModel):
@@ -184,7 +186,14 @@ def _classify_llm(jd_text: str) -> str:
     system_prompt=INDICATORS_SYSTEM,
     use_stream=True
 )
-def _generate_indicators_llm(jd_text: str, position_type: str, classify_result: ClassifyResult, strategy: dict, feedback: str | None = None) -> str:
+def _generate_indicators_llm(
+    jd_text: str,
+    position_type: str,
+    classify_result: ClassifyResult,
+    strategy: dict,
+    feedback: str | None = None,
+    inherited_suggestions: List[dict] | None = None,
+) -> str:
 
     prompt = f"""
 你需要根据岗位职责和类型策略，为该岗位设计绩效考核指标体系。
@@ -212,6 +221,21 @@ def _generate_indicators_llm(jd_text: str, position_type: str, classify_result: 
 5. 结合JD内容，指标名称和定义要具体（引用JD中的产品/区域/系统名称）
 """
 
+    if inherited_suggestions:
+        suggestion_json = json.dumps(
+            inherited_suggestions,
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        prompt += f"""
+
+【已接受且尚未承接的上一周期建议】
+{suggestion_json}
+
+必须为上面每个建议生成且仅生成一个承接指标，并把建议的 id 原样写入该指标的
+source_suggestion_id。不得遗漏、重复或虚构 source_suggestion_id。
+"""
+
     if feedback:
         prompt += f"\n【用户反馈】\n{feedback}\n\n请根据用户反馈调整指标设计。\n"
 
@@ -234,12 +258,13 @@ def _generate_indicators_llm(jd_text: str, position_type: str, classify_result: 
 
 请返回完整的 JSON（PStageResult 格式），包含 position_type, position_type_name, suggested_position_name,
 classification_reasoning, assessment_period, indicators（List），coaching_period, result_application 字段。
-indicators 中每个指标包含：id, name, definition, type, unit, target, target_display, target_logic, weight, scoring_rule, is_redline。
+    indicators 中每个指标包含：id, name, definition, type, unit, target, target_display, target_logic, weight, scoring_rule, is_redline，
+    以及可选的 source_suggestion_id（仅承接上述建议的指标填写）。
 """
     return prompt
 
 
-def classify_node(state: PGraphState) -> PGraphState:
+async def classify_node(state: PGraphState) -> PGraphState:
     """分类节点"""
     try:
         ui_callback = state.get("ui_callback")
@@ -247,7 +272,7 @@ def classify_node(state: PGraphState) -> PGraphState:
         if ui_callback:
             kwargs["ui_callback"] = ui_callback
 
-        result = _classify_llm(state["jd_text"], **kwargs)
+        result = await run_sync_llm(_classify_llm, state["jd_text"], **kwargs)
         return {**state, "classify_result": result}
     except Exception as e:
         return {**state, "error": str(e)}
@@ -268,7 +293,8 @@ async def generate_indicators_node(state: PGraphState) -> PGraphState:
 
         strategy = await get_prototype_config(db, classify_result.position_type)
 
-        result = _generate_indicators_llm(
+        result = await run_sync_llm(
+            _generate_indicators_llm,
             state["jd_text"],
             classify_result.position_type,
             classify_result,
@@ -313,18 +339,26 @@ async def run_p_stage(jd_text: str, db: AsyncSession = None, ui_callback=None) -
 
 async def run_classify_only(jd_text: str) -> ClassifyResult:
     """只运行分类，不生成指标"""
-    classify_result = _classify_llm(jd_text)
+    classify_result = await run_sync_llm(_classify_llm, jd_text)
     return classify_result
 
 
-async def run_generate_indicators(jd_text: str, classify_result: ClassifyResult, db: AsyncSession, feedback: str | None = None) -> PStageResult:
+async def run_generate_indicators(
+    jd_text: str,
+    classify_result: ClassifyResult,
+    db: AsyncSession,
+    feedback: str | None = None,
+    inherited_suggestions: List[dict] | None = None,
+) -> PStageResult:
     """根据分类结果生成指标"""
     strategy = await get_prototype_config(db, classify_result.position_type)
-    p_result = _generate_indicators_llm(
+    p_result = await run_sync_llm(
+        _generate_indicators_llm,
         jd_text,
         classify_result.position_type,
         classify_result,
         strategy,
-        feedback
+        feedback,
+        inherited_suggestions,
     )
     return p_result

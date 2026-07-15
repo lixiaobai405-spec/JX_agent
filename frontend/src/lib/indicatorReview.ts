@@ -1,7 +1,9 @@
 import type { DiagnosticReport, Indicator, TrafficLight } from '@/types'
 
 type DiagnosticIndicatorResult = {
+  indicator_id?: unknown
   name?: unknown
+  indicator_name?: unknown
   actual?: unknown
   actual_value?: unknown
   target_display?: unknown
@@ -45,12 +47,13 @@ function findDiagnosticIndicatorResult(
   const analysis = diagnostic?.indicators_analysis
   if (!isRecord(analysis) || !Array.isArray(analysis.indicator_results)) return null
 
-  return (
-    analysis.indicator_results.find(
-      (item): item is DiagnosticIndicatorResult =>
-        isRecord(item) && item.name === indicator.name,
-    ) ?? null
-  )
+  return analysis.indicator_results.find((item): item is DiagnosticIndicatorResult => {
+    if (!isRecord(item)) return false
+    if (item.indicator_id !== undefined && item.indicator_id !== null && item.indicator_id !== '') {
+      return item.indicator_id === indicator.id
+    }
+    return item.name === indicator.name || item.indicator_name === indicator.name
+  }) ?? null
 }
 
 export function getIndicatorReviewContext(
