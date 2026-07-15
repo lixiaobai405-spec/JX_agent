@@ -181,6 +181,41 @@ export interface FinalResult {
   created_at: string
 }
 
+export interface PeriodHistoryDiagnosticSummary {
+  id: string
+  report_date: string
+  weighted_achievement_rate: number | null
+  traffic_light_status: TrafficLight | null
+}
+
+export interface PeriodHistoryFinalResultSummary {
+  id: string
+  final_grade: string
+  status: FinalResult['status']
+  confirmed_at: string
+}
+
+export interface PeriodHistoryItem {
+  period_id: string
+  user_id: string
+  name: string
+  start_date: string
+  end_date: string
+  status: PeriodStatus
+  description: string | null
+  goal_id: string | null
+  diagnostic_summary: PeriodHistoryDiagnosticSummary | null
+  final_result_summary: PeriodHistoryFinalResultSummary | null
+  has_data_conflict: boolean
+}
+
+export interface PeriodHistoryResponse {
+  items: PeriodHistoryItem[]
+  total: number
+  page: number
+  page_size: number
+}
+
 export interface ReviewReport {
   id: string
   final_result_id: string

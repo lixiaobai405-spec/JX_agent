@@ -1,6 +1,7 @@
 """
 D/C 阶段计算逻辑
 """
+import math
 from typing import List, Dict, Any, Optional
 
 
@@ -16,28 +17,50 @@ def calc_achievement_rate(
     - qualitative（定性）：文字评级
     - redline（红线）：次数
     """
+    try:
+        target_value = float(target)
+        actual_value = float(actual)
+    except (TypeError, ValueError, OverflowError):
+        return 0.0
+
+    if not math.isfinite(target_value) or not math.isfinite(actual_value):
+        return 0.0
+
     if indicator_type == "positive":
-        if target == 0:
-            return 100.0
-        return min((actual / target) * 100, 150.0)
+        if actual_value < 0:
+            return 0.0
+        if target_value == 0:
+            rate = 100.0
+        else:
+            rate = (actual_value / target_value) * 100
+        upper_bound = 150.0
 
     elif indicator_type == "negative":
-        if target == 0:
-            return 100.0 if actual == 0 else 0.0
-        if actual <= 0:
-            return 150.0
-        return min((target / actual) * 100, 150.0)
+        if target_value == 0:
+            rate = 100.0 if actual_value == 0 else 0.0
+        elif actual_value <= 0:
+            rate = 150.0
+        else:
+            rate = (target_value / actual_value) * 100
+        upper_bound = 150.0
 
     elif indicator_type == "qualitative":
         # actual 传入字符串评级，这里转为数字处理
         # 调用方传 actual 为 0-100 的分数（已在上层转换）
-        return min(actual, 100.0)
+        rate = actual_value
+        upper_bound = 100.0
 
     elif indicator_type == "redline":
         # actual = 发生次数
-        return 100.0 if actual == 0 else 0.0
+        rate = 100.0 if actual_value == 0 else 0.0
+        upper_bound = 150.0
 
-    return 0.0
+    else:
+        return 0.0
+
+    if not math.isfinite(rate):
+        return 0.0
+    return min(max(rate, 0.0), upper_bound)
 
 
 def qualitative_to_score(level: str) -> float:

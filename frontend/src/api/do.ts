@@ -1,12 +1,22 @@
 import client from './client'
 import { normalizeList } from '@/lib/api-normalizers'
 import { buildCoachingStatusUpdatePayload } from '@/lib/coaching'
-import type { Period, Goal, Indicator, DiagnosticReport, DataCheckin, CoachingRequest } from '@/types'
+import type {
+  Period,
+  PeriodHistoryResponse,
+  Goal,
+  Indicator,
+  DiagnosticReport,
+  DataCheckin,
+  CoachingRequest,
+} from '@/types'
 
 export const periodsApi = {
   list: () => client.get<{ items: Period[] | null }>('/periods/').then((r) => normalizeList<Period>(r.data.items)),
   listByStatus: (status: string) => client.get<{ items: Period[] | null }>('/periods/', { params: { status } }).then((r) => normalizeList<Period>(r.data.items)),
   current: () => client.get<Period>('/periods/current').then((r) => r.data),
+  history: (user_id: string, page: number, limit: number) =>
+    client.get<PeriodHistoryResponse>('/periods/history', { params: { user_id, page, limit } }).then((r) => r.data),
   create: (data: Partial<Period>) => client.post<Period>('/periods/', data).then((r) => r.data),
   updateStatus: (id: string, status: string) =>
     client.put<Period>(`/periods/${id}/status`, { status }).then((r) => r.data),

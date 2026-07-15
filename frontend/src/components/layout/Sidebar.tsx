@@ -22,7 +22,15 @@ interface NavItem {
   end?: boolean
 }
 
-function NavGroup({ title, items }: { title?: string; items: NavItem[] }) {
+function NavGroup({
+  title,
+  items,
+  onNavigate,
+}: {
+  title?: string
+  items: NavItem[]
+  onNavigate?: () => void
+}) {
   return (
     <div className="flex flex-col gap-0.5">
       {title && (
@@ -35,6 +43,7 @@ function NavGroup({ title, items }: { title?: string; items: NavItem[] }) {
           key={item.to}
           to={item.to}
           end={item.end}
+          onClick={onNavigate}
           className={({ isActive }) =>
             cn(
               'flex items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors',
@@ -52,7 +61,7 @@ function NavGroup({ title, items }: { title?: string; items: NavItem[] }) {
   )
 }
 
-export function Sidebar() {
+export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const { data: user } = useCurrentUser()
 
   const pdcaItems: NavItem[] = [
@@ -66,7 +75,7 @@ export function Sidebar() {
   const isAdmin = user && ADMIN_ROLES.includes(user.role)
 
   return (
-    <aside className="flex h-screen w-60 shrink-0 flex-col border-r bg-sidebar">
+    <aside aria-label="主导航" className="flex h-full w-60 shrink-0 flex-col border-r bg-sidebar">
       {/* Logo */}
       <div className="flex h-[60px] items-center justify-center border-b border-sidebar-border px-4">
         <img src="/logo.png" alt="logo" className="h-8 object-contain" />
@@ -75,6 +84,7 @@ export function Sidebar() {
       {/* Nav */}
       <nav className="flex flex-col gap-4 overflow-y-auto p-3">
         <NavGroup
+          onNavigate={onNavigate}
           items={[
             { to: '/profile', label: '个人主页', icon: <User className="size-4" />, end: true },
           ]}
@@ -83,11 +93,13 @@ export function Sidebar() {
         <NavGroup
           title="PDCA 绩效"
           items={pdcaItems}
+          onNavigate={onNavigate}
         />
 
         {isManager && (
           <NavGroup
             title="管理视图"
+            onNavigate={onNavigate}
             items={[
               { to: '/management', label: '团队总览', icon: <Users className="size-4" /> },
             ]}
@@ -97,6 +109,7 @@ export function Sidebar() {
         {isAdmin && (
           <NavGroup
             title="管理员"
+            onNavigate={onNavigate}
             items={[
               { to: '/admin/org', label: '组织管理', icon: <Building2 className="size-4" /> },
               { to: '/admin/periods', label: '考核期管理', icon: <Calendar className="size-4" /> },
