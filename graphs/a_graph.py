@@ -255,8 +255,12 @@ def _review_plan_llm(
    - time_bound: {{status: "✅/⚠️/❌", comment: "评价"}}
 
 2. polished_goals: 润色后的目标（Markdown 格式，保持原意但更具体、可衡量）
+   - 不要使用 ** 加粗语法
+   - 需要列举时只使用 1.、2.、3. 形式的有序列表，不要使用 - 开头的无序列表
 
 3. polished_actions: 润色后的行动计划（Markdown 格式，补充时间节点和可衡量的里程碑）
+   - 不要使用 ** 加粗语法
+   - 需要列举时只使用 1.、2.、3. 形式的有序列表，不要使用 - 开头的无序列表
 
 4. overall_review: 综合评价和建议（Markdown 格式，1-2段）
 

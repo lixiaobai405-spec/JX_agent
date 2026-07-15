@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Sparkles, RefreshCw, CheckCircle2, ThumbsUp, ThumbsDown, Clock } from 'lucide-react'
+import { Sparkles, RefreshCw, CheckCircle2, ThumbsUp, ThumbsDown, Clock, Eye, Pencil } from 'lucide-react'
 import {
   useCurrentUser, useCurrentPeriod, useCurrentGoal, useFinalResult,
   useMyPlans, useReviewReportByUser, useInheritanceSuggestions, usePeriods, useTeamPlans,
@@ -17,6 +17,13 @@ import {
 import { actionApi } from '@/api/action'
 import { AILoadingSkeleton } from '@/components/shared/AILoadingSkeleton'
 import { getPlanText, getSuggestionSummary } from '@/lib/pdcaFeedback'
+import {
+  DEFAULT_MARKDOWN_EDITOR_MODE,
+  formatMarkdownPreview,
+  normalizeEditableMarkdown,
+  toggleMarkdownEditorMode,
+  type MarkdownEditorMode,
+} from '@/lib/markdownEditor'
 
 const SUGGESTION_TYPE_MAP: Record<string, string> = {
   new_goal: '新目标', new_indicator: '新指标', adjust_weight: '调整权重', raise_target: '提高目标',
@@ -26,6 +33,14 @@ type PlanAiSuggestions = {
   polished_goals?: string
   polished_actions?: string
   overall_review?: string
+}
+
+function MarkdownPreview({ content }: { content: string }) {
+  return (
+    <div className="max-w-none rounded-md border bg-background px-4 py-3 text-sm leading-6 break-words [&_h1]:mb-3 [&_h1]:text-xl [&_h1]:font-semibold [&_h2]:mb-3 [&_h2]:text-lg [&_h2]:font-semibold [&_h3]:mb-2 [&_h3]:font-semibold [&_li]:my-1 [&_ol]:mb-3 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_strong]:font-semibold [&_ul]:mb-3 [&_ul]:list-disc [&_ul]:pl-6">
+      <ReactMarkdown>{formatMarkdownPreview(content)}</ReactMarkdown>
+    </div>
+  )
 }
 
 export function ActionPage() {
@@ -61,6 +76,7 @@ export function ActionPage() {
   const [planFeedback, setPlanFeedback] = useState('')
   const [polishedGoals, setPolishedGoals] = useState<string | null>(null)
   const [polishedActions, setPolishedActions] = useState<string | null>(null)
+  const [polishMode, setPolishMode] = useState<MarkdownEditorMode>(DEFAULT_MARKDOWN_EDITOR_MODE)
   const [rejectSuggestionId, setRejectSuggestionId] = useState<string | null>(null)
   const [rejectReason, setRejectReason] = useState('')
   const [rejectPlanId, setRejectPlanId] = useState<string | null>(null)
@@ -69,8 +85,8 @@ export function ActionPage() {
   const planAiSuggestions = plan?.ai_suggestions as PlanAiSuggestions | null | undefined
   const planGoalText = planGoals ?? getPlanText(plan?.goals)
   const planActionText = planActions ?? getPlanText(plan?.actions)
-  const polishedGoalText = polishedGoals ?? planAiSuggestions?.polished_goals ?? ''
-  const polishedActionText = polishedActions ?? planAiSuggestions?.polished_actions ?? ''
+  const polishedGoalText = normalizeEditableMarkdown(polishedGoals ?? planAiSuggestions?.polished_goals ?? '')
+  const polishedActionText = normalizeEditableMarkdown(polishedActions ?? planAiSuggestions?.polished_actions ?? '')
 
   const planPayload = () => ({
     goals: { text: planGoalText },
@@ -121,8 +137,9 @@ export function ActionPage() {
     },
     onSuccess: (updatedPlan) => {
       const suggestions = updatedPlan.ai_suggestions as PlanAiSuggestions | null
-      setPolishedGoals(suggestions?.polished_goals || '')
-      setPolishedActions(suggestions?.polished_actions || '')
+      setPolishedGoals(normalizeEditableMarkdown(suggestions?.polished_goals || ''))
+      setPolishedActions(normalizeEditableMarkdown(suggestions?.polished_actions || ''))
+      setPolishMode(DEFAULT_MARKDOWN_EDITOR_MODE)
       toast.success('AI 审核完成')
       qc.invalidateQueries({ queryKey: ['my-plans'] })
     },
@@ -433,14 +450,37 @@ export function ActionPage() {
                 {polishedGoalText && polishedActionText ? (
                   <Card className="border-green-500/30 bg-green-50/50 dark:bg-green-950/20">
                     <CardContent className="pt-3 flex flex-col gap-3">
-                      <p className="font-medium text-sm">AI 润色建议（可编辑）</p>
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="font-medium text-sm">AI 润色建议（可编辑）</p>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setPolishMode((mode) => toggleMarkdownEditorMode(mode))}
+                        >
+                          {polishMode === 'preview' ? (
+                            <Pencil data-icon="inline-start" />
+                          ) : (
+                            <Eye data-icon="inline-start" />
+                          )}
+                          {polishMode === 'preview' ? '编辑' : '预览'}
+                        </Button>
+                      </div>
                       <div className="flex flex-col gap-1.5">
                         <Label>润色后的目标</Label>
-                        <Textarea rows={4} value={polishedGoalText} onChange={(e) => setPolishedGoals(e.target.value)} className="bg-background" />
+                        {polishMode === 'preview' ? (
+                          <MarkdownPreview content={polishedGoalText} />
+                        ) : (
+                          <Textarea rows={8} value={polishedGoalText} onChange={(e) => setPolishedGoals(e.target.value)} className="bg-background" />
+                        )}
                       </div>
                       <div className="flex flex-col gap-1.5">
                         <Label>润色后的行动计划</Label>
-                        <Textarea rows={4} value={polishedActionText} onChange={(e) => setPolishedActions(e.target.value)} className="bg-background" />
+                        {polishMode === 'preview' ? (
+                          <MarkdownPreview content={polishedActionText} />
+                        ) : (
+                          <Textarea rows={8} value={polishedActionText} onChange={(e) => setPolishedActions(e.target.value)} className="bg-background" />
+                        )}
                       </div>
                       <Button size="sm" className="self-start" onClick={() => acceptPolish()} disabled={planMutationPending}>
                         {acceptPending && <RefreshCw data-icon="inline-start" className="animate-spin" />}
