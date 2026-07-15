@@ -23,6 +23,9 @@ export const checkApi = {
   pendingEvaluationTasks: () =>
     client.get<EvaluationTask[]>('/check/evaluation-tasks/my-pending').then((r) => r.data),
 
+  pendingEvaluationTaskCount: () =>
+    client.get<{ count: number }>('/check/evaluation-tasks/my-pending-count').then((r) => r.data),
+
   getGoalEvaluations: (goal_id: string) =>
     client.get<Evaluation[]>(`/check/evaluations/goal/${goal_id}`).then((r) => r.data),
 

@@ -1,7 +1,14 @@
 from datetime import datetime
 from typing import Annotated
 
-from pydantic import BaseModel, StringConstraints
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
 
 
 class JobAnalysisCreate(BaseModel):
@@ -37,6 +44,40 @@ class ContractGenerateRequest(BaseModel):
 
 class ContractConfirmRequest(BaseModel):
     confirmed_by: str
+
+
+class ContractTargetUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    indicator_id: int | str
+    target: float = Field(allow_inf_nan=False)
+
+    @field_validator("indicator_id", "target", mode="before")
+    @classmethod
+    def reject_booleans(cls, value):
+        if isinstance(value, bool):
+            raise ValueError("boolean values are not allowed")
+        return value
+
+    @field_validator("indicator_id")
+    @classmethod
+    def reject_empty_indicator_id(cls, value):
+        if isinstance(value, str) and not value.strip():
+            raise ValueError("indicator_id must not be empty")
+        return value
+
+
+class ContractTargetsUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    targets: list[ContractTargetUpdate] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def reject_duplicate_indicator_ids(self):
+        normalized_ids = [str(item.indicator_id) for item in self.targets]
+        if len(normalized_ids) != len(set(normalized_ids)):
+            raise ValueError("indicator_id values must be unique")
+        return self
 
 
 class ContractResponse(BaseModel):

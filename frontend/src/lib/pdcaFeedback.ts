@@ -5,13 +5,13 @@ type TrafficLightStatus = 'green' | 'yellow' | 'red'
 const TRAFFIC_LIGHT_VALUES = new Set(['green', 'yellow', 'red'])
 
 export const C_GRADE_RULES = [
-  { grade: 'S', range: '90-100', label: '优秀' },
-  { grade: 'A', range: '80-89', label: '良好' },
-  { grade: 'B', range: '70-79', label: '合格' },
-  { grade: 'C', range: '<70', label: '待改进' },
+  { grade: 'S', range: '[90, 100]', label: '优秀' },
+  { grade: 'A', range: '[80, 90)', label: '良好' },
+  { grade: 'B', range: '[70, 80)', label: '合格' },
+  { grade: 'C', range: '[0, 70)', label: '待改进' },
 ]
 
-export const C_GRADE_RULE_TEXT = '定级规则：S 90-100，A 80-89，B 70-79，C 70 以下；红线触发按次数扣分。'
+export const C_GRADE_RULE_TEXT = '定级规则：S 为 [90, 100]，A 为 [80, 90)，B 为 [70, 80)，C 为 [0, 70)；红线触发按次数扣分。'
 
 export function getPlanText(value: unknown): string {
   if (!value) return ''
@@ -33,12 +33,10 @@ export function getDiagnosticIndicatorStatus(
   const match = results.find((item) => {
     if (!item || typeof item !== 'object') return false
     const result = item as Record<string, unknown>
-    return (
-      result.indicator_id === indicator.id ||
-      result.id === indicator.id ||
-      result.name === indicator.name ||
-      result.indicator_name === indicator.name
-    )
+    if (result.indicator_id !== undefined && result.indicator_id !== null && result.indicator_id !== '') {
+      return result.indicator_id === indicator.id
+    }
+    return result.name === indicator.name || result.indicator_name === indicator.name
   })
 
   if (!match || typeof match !== 'object') return null

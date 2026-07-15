@@ -29,6 +29,14 @@ import {
 } from '@/lib/coaching'
 import { normalizeDiagnosticMarkdown } from '@/lib/diagnosticMarkdown'
 import { getDiagnosticIndicatorStatus } from '@/lib/pdcaFeedback'
+import {
+  buildCheckinValue,
+  formatCheckinValue,
+  getIndicatorCheckinKind,
+  isCheckinInputValid,
+  QUALITATIVE_STATUS_LABELS,
+} from '@/lib/checkins'
+import { formatAchievementRate, toAchievementProgress } from '@/lib/performance'
 import type { CoachingRequest, DiagnosticReport, Indicator } from '@/types'
 
 function CheckinDialog({ indicator, onCheckinSubmit }: { indicator: Indicator; onCheckinSubmit?: () => void }) {
@@ -39,11 +47,15 @@ function CheckinDialog({ indicator, onCheckinSubmit }: { indicator: Indicator; o
   const qc = useQueryClient()
   const { data: checkins } = useIndicatorCheckins(indicator.id)
   const latestCheckin = checkins?.[0]
+  const checkinKind = getIndicatorCheckinKind(indicator)
+  const targetDisplay = indicator.target_display ?? (
+    indicator.target_value != null ? `${indicator.target_value}${indicator.unit ?? ''}` : null
+  )
 
   const { mutate, isPending } = useMutation({
     mutationFn: () => doApi.submitCheckin({
       indicator_id: indicator.id,
-      actual_value: parseFloat(value),
+      actual_value: buildCheckinValue(indicator, value),
       progress_description: desc || undefined,
       issues: issues || undefined,
     }),
@@ -51,6 +63,9 @@ function CheckinDialog({ indicator, onCheckinSubmit }: { indicator: Indicator; o
       toast.success('打卡成功，请重新生成诊断报告以查看最新分析')
       qc.invalidateQueries({ queryKey: ['checkins', indicator.id] })
       onCheckinSubmit?.()
+      setValue('')
+      setDesc('')
+      setIssues('')
       setOpen(false)
     },
   })
@@ -65,15 +80,39 @@ function CheckinDialog({ indicator, onCheckinSubmit }: { indicator: Indicator; o
         <DialogContent>
           <DialogHeader><DialogTitle>提交进度 · {indicator.name}</DialogTitle></DialogHeader>
           <div className="flex flex-col gap-4 pt-2">
-            {indicator.target_value != null && (
-              <p className="text-sm text-muted-foreground">目标值：<span className="font-medium text-foreground">{indicator.target_value}</span></p>
+            {targetDisplay && (
+              <p className="text-sm text-muted-foreground">目标值：<span className="font-medium text-foreground">{targetDisplay}</span></p>
             )}
             {latestCheckin && (
-              <p className="text-sm text-muted-foreground">上次填报：<span className="font-medium text-foreground">{(latestCheckin.actual_value as Record<string, number>).value}</span></p>
+              <p className="text-sm text-muted-foreground">上次填报：<span className="font-medium text-foreground">{formatCheckinValue(latestCheckin.actual_value, indicator.unit)}</span></p>
             )}
             <div className="flex flex-col gap-1.5">
-              <Label>实际值</Label>
-              <Input type="number" value={value} onChange={(e) => setValue(e.target.value)} placeholder="输入本期实际数值" />
+              {checkinKind === 'qualitative' ? (
+                <>
+                  <Label>完成状态</Label>
+                  <Select value={value} onValueChange={(nextValue) => nextValue && setValue(nextValue)}>
+                    <SelectTrigger className="w-full"><SelectValue placeholder="选择完成状态" /></SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(QUALITATIVE_STATUS_LABELS).map(([status, label]) => (
+                        <SelectItem key={status} value={status}>{label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </>
+              ) : (
+                <>
+                  <Label>{checkinKind === 'redline' ? '发生次数' : '实际完成值'}</Label>
+                  <Input
+                    type="number"
+                    min={checkinKind === 'redline' ? 0 : undefined}
+                    step={checkinKind === 'redline' ? 1 : 'any'}
+                    inputMode={checkinKind === 'redline' ? 'numeric' : 'decimal'}
+                    value={value}
+                    onChange={(event) => setValue(event.target.value)}
+                    placeholder={checkinKind === 'redline' ? '输入非负整数次数' : '输入本期实际完成值'}
+                  />
+                </>
+              )}
             </div>
             <div className="flex flex-col gap-1.5">
               <Label>进展说明</Label>
@@ -84,8 +123,8 @@ function CheckinDialog({ indicator, onCheckinSubmit }: { indicator: Indicator; o
               <Textarea rows={2} value={issues} onChange={(e) => setIssues(e.target.value)} placeholder="遇到的困难或需要协调的资源..." />
             </div>
             <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setOpen(false)}>取消</Button>
-              <Button onClick={() => mutate()} disabled={isPending || !value.trim()}>
+              <Button variant="outline" onClick={() => setOpen(false)} disabled={isPending}>取消</Button>
+              <Button onClick={() => mutate()} disabled={isPending || !isCheckinInputValid(indicator, value)}>
                 {isPending && <RefreshCw data-icon="inline-start" className="animate-spin" />}
                 提交打卡
               </Button>
@@ -142,7 +181,7 @@ function CoachingDialog({ reportId }: { reportId?: string }) {
               <Textarea rows={4} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="说明需要辅导的具体问题..." />
             </div>
             <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setOpen(false)}>取消</Button>
+              <Button variant="outline" onClick={() => setOpen(false)} disabled={isPending}>取消</Button>
               <Button onClick={() => mutate()} disabled={isPending}>
                 {isPending && <RefreshCw data-icon="inline-start" className="animate-spin" />}
                 提交请求
@@ -217,21 +256,23 @@ function IndicatorCard({
   onCheckinSubmit?: () => void
 }) {
   const { data: checkins } = useIndicatorCheckins(indicator.id)
-  const latestValue = checkins?.[0] ? (checkins[0].actual_value as Record<string, number>).value : null
+  const latestValue = checkins?.[0] ? formatCheckinValue(checkins[0].actual_value, indicator.unit) : null
   const status = getDiagnosticIndicatorStatus(diagnostic, indicator)
 
   return (
     <Card>
-      <CardContent className="flex items-center justify-between py-3">
-        <div className="flex flex-col gap-0.5">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-medium">{indicator.name}</span>
+      <CardContent className="flex flex-col items-stretch gap-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="break-words text-sm font-medium">{indicator.name}</span>
             {indicator.redline && <Badge variant="destructive" className="text-xs">一票否决</Badge>}
             <TrafficLight status={status} />
           </div>
-          <div className="flex gap-2 text-xs text-muted-foreground">
-            <span>权重 {Math.round(indicator.weight * 100)}%</span>
-            {indicator.target_value != null && <span>目标 {indicator.target_value}</span>}
+          <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+            <span>权重 {formatAchievementRate(indicator.weight * 100)}</span>
+            {(indicator.target_display || indicator.target_value != null) && (
+              <span>目标 {indicator.target_display ?? `${indicator.target_value}${indicator.unit ?? ''}`}</span>
+            )}
             {latestValue != null && <span className="text-foreground font-medium">实际 {latestValue}</span>}
           </div>
         </div>
@@ -281,20 +322,18 @@ export function DoPage() {
     return (
       <div className="flex flex-col gap-4 max-w-3xl">
         <h1 className="text-2xl font-semibold">D - 执行追踪</h1>
-        <p className="text-sm text-muted-foreground">填报实际完成值，按单项指标生成红绿灯状态和偏差分析。</p>
+        <p className="text-sm text-muted-foreground">按指标类型填报完成情况，并生成单项状态与偏差诊断。</p>
         <Card><CardContent className="py-10 text-center text-muted-foreground">暂无考核期或合约未确认，请先完成 P 阶段</CardContent></Card>
       </div>
     )
   }
 
   return (
-    <div className="flex flex-col gap-6 max-w-4xl">
-      <div className="flex items-center justify-between">
+    <div className="flex w-full max-w-4xl flex-col gap-6">
+      <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold">D - 执行追踪</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            {period.name} · 填报实际完成值，按单项指标生成红绿灯状态和偏差分析。
-          </p>
+          <p className="mt-1 text-sm text-muted-foreground">按指标类型填报完成情况，并生成单项状态与偏差诊断。</p>
         </div>
         {diagnostic && <TrafficLight status={diagnostic.traffic_light_status} />}
       </div>
@@ -303,17 +342,17 @@ export function DoPage() {
         <Card>
           <CardContent className="pt-4 flex flex-col gap-3">
             <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">加权完成率</span>
+              <span className="text-muted-foreground">加权达成率</span>
               <span className="font-semibold text-base">
-                {diagnostic.weighted_achievement_rate != null ? `${Math.round(diagnostic.weighted_achievement_rate)}%` : '—'}
+                {formatAchievementRate(diagnostic.weighted_achievement_rate)}
               </span>
             </div>
-            {diagnostic.weighted_achievement_rate != null && <Progress value={diagnostic.weighted_achievement_rate} />}
-            <div className="flex gap-4 text-xs text-muted-foreground">
-              <span>时间进度：{diagnostic.time_progress != null ? `${Math.round(diagnostic.time_progress)}%` : '—'}</span>
+            {diagnostic.weighted_achievement_rate != null && <Progress value={toAchievementProgress(diagnostic.weighted_achievement_rate)} />}
+            <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
+              <span>时间进度：{formatAchievementRate(diagnostic.time_progress)}</span>
               {diagnostic.progress_deviation != null && (
                 <span className={diagnostic.progress_deviation < 0 ? 'text-destructive' : 'text-green-600'}>
-                  进度偏差分析：{diagnostic.progress_deviation > 0 ? '+' : ''}{Math.round(diagnostic.progress_deviation)}%
+                  进度偏差：{diagnostic.progress_deviation > 0 ? '+' : ''}{formatAchievementRate(diagnostic.progress_deviation)}
                 </span>
               )}
             </div>
@@ -348,7 +387,7 @@ export function DoPage() {
         {/* 右栏：诊断报告 */}
         <div className="flex flex-col gap-4">
           <div className="flex items-center justify-between">
-            <h2 className="font-medium">AI 诊断报告</h2>
+            <h2 className="font-medium">AI 偏差分析</h2>
             <CoachingDialog reportId={diagnostic?.id} />
           </div>
           {hasPendingCheckin && (

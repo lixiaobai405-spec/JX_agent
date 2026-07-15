@@ -2,6 +2,7 @@ import unittest
 from datetime import datetime, timezone
 from unittest.mock import patch
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from api.v1.action.service import generate_review_report
@@ -19,6 +20,7 @@ from models.check_phase import (
     ScoreMethod,
 )
 from models.period import Period, PeriodStatus
+from models.plan_phase import AIGenerationLog
 from models.user import User, UserRole
 
 # Import models with foreign keys referenced by the tables under test.
@@ -80,7 +82,7 @@ class ReviewReportFallbackTest(unittest.IsolatedAsyncioTestCase):
             strong_indicator = Indicator(
                 id="indicator-strong",
                 goal_id=goal.id,
-                name="销售回款率",
+                name="重复指标",
                 direction=IndicatorDirection.positive,
                 weight=0.6,
                 target_value=100,
@@ -89,11 +91,21 @@ class ReviewReportFallbackTest(unittest.IsolatedAsyncioTestCase):
             weak_indicator = Indicator(
                 id="indicator-weak",
                 goal_id=goal.id,
-                name="新品铺货率",
+                name="重复指标",
                 direction=IndicatorDirection.positive,
                 weight=0.4,
                 target_value=100,
                 score_method=ScoreMethod.ratio,
+            )
+            redline_indicator = Indicator(
+                id="indicator-redline",
+                goal_id=goal.id,
+                name="重复指标",
+                direction=IndicatorDirection.negative,
+                weight=0,
+                target_value=0,
+                score_method=ScoreMethod.binary,
+                redline=True,
             )
             task = EvaluationTask(
                 id="task-1",
@@ -121,11 +133,25 @@ class ReviewReportFallbackTest(unittest.IsolatedAsyncioTestCase):
                 evaluator_id=manager.id,
                 score=72,
             )
+            redline_evaluation = Evaluation(
+                id="evaluation-redline",
+                task_id=task.id,
+                goal_id=goal.id,
+                indicator_id=redline_indicator.id,
+                evaluator_id=manager.id,
+                score=100,
+            )
             score_aggregate = ScoreAggregate(
                 id="score-aggregate-1",
                 goal_id=goal.id,
                 final_score=84,
-                breakdown={},
+                breakdown={
+                    "indicator_scores": [
+                        {"indicator_id": strong_indicator.id, "score": 92},
+                        {"indicator_id": weak_indicator.id, "score": 72},
+                        {"indicator_id": redline_indicator.id, "score": 100},
+                    ]
+                },
                 computed_at=now,
             )
             final_result = FinalResult(
@@ -147,14 +173,17 @@ class ReviewReportFallbackTest(unittest.IsolatedAsyncioTestCase):
                     goal,
                     strong_indicator,
                     weak_indicator,
+                    redline_indicator,
                     task,
                     strong_evaluation,
                     weak_evaluation,
+                    redline_evaluation,
                     score_aggregate,
                     final_result,
                 ]
             )
             await session.commit()
+            employee_id = employee.id
 
             with patch(
                 "api.v1.action.service.run_a_stage",
@@ -165,9 +194,24 @@ class ReviewReportFallbackTest(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(report.ai_generated)
             self.assertEqual(report.report_type, "s_a")
             self.assertTrue(report.development_suggestions["fallback"])
-            self.assertIn("mock validation failed", report.development_suggestions["fallback_reason"])
-            self.assertEqual(report.strengths_analysis["strengths"][0]["indicator"], "销售回款率")
-            self.assertEqual(report.improvement_areas["areas"][0]["indicator"], "新品铺货率")
+            self.assertNotIn(
+                "mock validation failed",
+                report.development_suggestions["fallback_reason"],
+            )
+            self.assertEqual(len(report.strengths_analysis["strengths"]), 1)
+            self.assertEqual(report.strengths_analysis["strengths"][0]["score"], 92)
+            self.assertEqual(len(report.improvement_areas["areas"]), 1)
+            self.assertEqual(report.improvement_areas["areas"][0]["score"], 72)
+
+            log = await session.scalar(
+                select(AIGenerationLog).where(
+                    AIGenerationLog.job_type == "review_report",
+                    AIGenerationLog.user_id == employee_id,
+                )
+            )
+            self.assertIsNotNone(log)
+            self.assertFalse(log.success)
+            self.assertIn("mock validation failed", log.error_message)
 
 
 if __name__ == "__main__":

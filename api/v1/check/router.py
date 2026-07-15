@@ -25,7 +25,7 @@ async def get_self_assessment(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_active_user),
 ):
-    return await service.get_self_assessment(db, assessment_id)
+    return await service.get_self_assessment(db, current_user, assessment_id)
 
 
 @router.put("/self-assessments/{assessment_id}", response_model=schemas.SelfAssessmentResponse)
@@ -36,7 +36,7 @@ async def update_self_assessment(
     current_user=Depends(get_current_active_user),
 ):
     items = {key: value.model_dump() for key, value in data.items.items()} if data.items is not None else None
-    return await service.update_self_assessment(db, assessment_id, items)
+    return await service.update_self_assessment(db, current_user, assessment_id, items)
 
 
 @router.post("/self-assessments/{assessment_id}/submit", response_model=schemas.SelfAssessmentResponse)
@@ -45,7 +45,7 @@ async def submit_self_assessment(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_active_user),
 ):
-    return await service.submit_self_assessment(db, assessment_id)
+    return await service.submit_self_assessment(db, current_user, assessment_id)
 
 
 @router.get("/self-assessments/goal/{goal_id}", response_model=schemas.SelfAssessmentResponse | None)
@@ -54,10 +54,22 @@ async def get_goal_self_assessment(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_active_user),
 ):
-    return await service.get_goal_self_assessment(db, goal_id)
+    return await service.get_goal_self_assessment(db, current_user, goal_id)
 
 
 # Evaluation Tasks
+@router.get(
+    "/evaluation-tasks/my-pending-count",
+    response_model=schemas.PendingEvaluationCountResponse,
+)
+async def get_my_pending_evaluation_count(
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_active_user),
+):
+    count = await service.get_my_pending_evaluation_count(db, current_user)
+    return {"count": count}
+
+
 @router.get("/evaluation-tasks/my-pending", response_model=list[schemas.EvaluationTaskResponse])
 async def get_my_pending_evaluation_tasks(
     db: AsyncSession = Depends(get_db),
@@ -100,7 +112,7 @@ async def list_goal_evaluations(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_active_user),
 ):
-    return await service.list_goal_evaluations(db, goal_id)
+    return await service.list_goal_evaluations(db, current_user, goal_id)
 
 
 # Final Results
@@ -119,7 +131,7 @@ async def get_final_result_by_goal(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_active_user),
 ):
-    return await service.get_final_result_by_goal(db, goal_id)
+    return await service.get_final_result_by_goal(db, current_user, goal_id)
 
 
 @router.put("/final-results/{result_id}/confirm", response_model=schemas.FinalResultResponse)

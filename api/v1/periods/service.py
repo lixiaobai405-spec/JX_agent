@@ -363,17 +363,24 @@ async def update_period(db: AsyncSession, current_user: User, period_id: str, da
 
 
 async def update_period_status(db: AsyncSession, current_user: User, period_id: str, new_status: PeriodStatus) -> Period:
-    from core.exceptions import PermissionDeniedError, PeriodStatusTransitionError, PeriodDateConflictError
+    from core.exceptions import (
+        PermissionDeniedError,
+        PeriodDateConflictError,
+        PeriodStatusTransitionError,
+        UserNotFoundError,
+    )
 
-    if current_user.role not in (UserRole.manager, UserRole.system_admin):
+    current_user_id = current_user.id
+    current_user_role = current_user.role
+    if current_user_role not in (UserRole.manager, UserRole.system_admin):
         raise PermissionDeniedError("Only managers and system admins can change period status")
 
-    period = await get_period(db, period_id)
+    period = await _get_period_for_update(db, period_id)
 
     # Managers can only change periods belonging to themselves or their subordinates.
-    if current_user.role == UserRole.manager:
-        subordinate_ids = await _get_subordinate_ids(db, current_user.id)
-        allowed_ids = subordinate_ids + [current_user.id]
+    if current_user_role == UserRole.manager:
+        subordinate_ids = await _get_subordinate_ids(db, current_user_id)
+        allowed_ids = subordinate_ids + [current_user_id]
         if period.user_id not in allowed_ids:
             raise PermissionDeniedError("Managers can only change periods for themselves or their subordinates")
 
@@ -381,6 +388,17 @@ async def update_period_status(db: AsyncSession, current_user: User, period_id: 
         raise PeriodStatusTransitionError(f"Cannot transition from {period.status.value} to {new_status.value}")
 
     if new_status == PeriodStatus.open:
+        owner_result = await db.execute(
+            select(User.id)
+            .where(
+                User.id == period.user_id,
+                User.status == UserStatus.active,
+                User.deleted_at.is_(None),
+            )
+            .with_for_update()
+        )
+        if owner_result.scalar_one_or_none() is None:
+            raise UserNotFoundError()
         existing = await db.execute(
             select(Period).where(
                 and_(Period.user_id == period.user_id, Period.status == PeriodStatus.open, Period.id != period_id, Period.deleted_at.is_(None))

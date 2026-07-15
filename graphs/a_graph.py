@@ -6,7 +6,7 @@ A 阶段 LangGraph — 复盘发展
 from typing import List, Dict, Any, Optional, TypedDict
 from pydantic import BaseModel
 from langgraph.graph import StateGraph, END
-from utils.llm import retry_and_validate, call_llm_simple, get_llm_client
+from utils.llm import retry_and_validate, run_sync_llm
 
 
 # ===== Pydantic 模型 =====
@@ -143,7 +143,7 @@ def _generate_review_llm(
 """
 
 
-def generate_review_node(state: AGraphState) -> AGraphState:
+async def generate_review_node(state: AGraphState) -> AGraphState:
     """复盘报告生成节点"""
     try:
         ui_callback = state.get("ui_callback")
@@ -151,7 +151,8 @@ def generate_review_node(state: AGraphState) -> AGraphState:
         if ui_callback:
             kwargs["ui_callback"] = ui_callback
 
-        report = _generate_review_llm(
+        report = await run_sync_llm(
+            _generate_review_llm,
             state["grade"],
             state["total_score"],
             state["indicator_scores"],
@@ -175,7 +176,7 @@ def build_a_graph():
 a_graph = build_a_graph()
 
 
-def run_a_stage(
+async def run_a_stage(
     grade: str,
     total_score: float,
     indicator_scores: List[Dict],
@@ -194,7 +195,7 @@ def run_a_stage(
         "error": None,
         "ui_callback": ui_callback,
     }
-    final_state = a_graph.invoke(initial_state)
+    final_state = await a_graph.ainvoke(initial_state)
     if final_state.get("error"):
         raise Exception(final_state["error"])
     return final_state["review_report"]
@@ -264,7 +265,7 @@ def _review_plan_llm(
     return prompt
 
 
-def review_plan(
+async def review_plan(
     grade: str,
     development_areas: List[Dict],
     plan_goal: str,
@@ -278,28 +279,19 @@ def review_plan(
     独立函数：AI 审核个人发展计划（非 LangGraph 节点）
     返回结构化的 SMART 评估和润色建议
     """
-    try:
-        result = _review_plan_llm(
-            grade=grade,
-            development_areas=development_areas,
-            plan_goal=plan_goal,
-            plan_actions=plan_actions,
-            plan_resources=plan_resources,
-            plan_timeline=plan_timeline,
-            feedback=feedback,
-        )
-        # 转换为字典格式
-        return {
-            "smart_evaluation": {k: {"status": v.status, "comment": v.comment} for k, v in result.smart_evaluation.items()},
-            "polished_goals": result.polished_goals,
-            "polished_actions": result.polished_actions,
-            "overall_review": result.overall_review,
-        }
-    except Exception as e:
-        # 降级返回简单格式
-        return {
-            "smart_evaluation": {},
-            "polished_goals": plan_goal,
-            "polished_actions": plan_actions,
-            "overall_review": f"AI 审核失败：{str(e)}",
-        }
+    result = await run_sync_llm(
+        _review_plan_llm,
+        grade=grade,
+        development_areas=development_areas,
+        plan_goal=plan_goal,
+        plan_actions=plan_actions,
+        plan_resources=plan_resources,
+        plan_timeline=plan_timeline,
+        feedback=feedback,
+    )
+    return {
+        "smart_evaluation": {k: {"status": v.status, "comment": v.comment} for k, v in result.smart_evaluation.items()},
+        "polished_goals": result.polished_goals,
+        "polished_actions": result.polished_actions,
+        "overall_review": result.overall_review,
+    }

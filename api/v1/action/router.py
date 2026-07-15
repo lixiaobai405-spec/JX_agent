@@ -24,7 +24,7 @@ async def get_review_report(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_active_user),
 ):
-    return await service.get_review_report(db, report_id)
+    return await service.get_review_report(db, current_user, report_id)
 
 
 @router.put("/review-reports/{report_id}/feedback", response_model=schemas.ReviewReportResponse)
@@ -34,7 +34,7 @@ async def submit_user_feedback(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_active_user),
 ):
-    return await service.submit_user_feedback(db, report_id, data.user_feedback)
+    return await service.submit_user_feedback(db, current_user, report_id, data.user_feedback)
 
 
 @router.get("/review-reports/user/{user_id}/period/{period_id}", response_model=schemas.ReviewReportResponse | None)
@@ -44,7 +44,7 @@ async def get_user_period_report(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_active_user),
 ):
-    return await service.get_user_period_report(db, user_id, period_id)
+    return await service.get_user_period_report(db, current_user, user_id, period_id)
 
 
 # Development Plans
@@ -79,7 +79,7 @@ async def get_development_plan(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_active_user),
 ):
-    return await service.get_development_plan(db, plan_id)
+    return await service.get_development_plan(db, current_user, plan_id)
 
 
 @router.put("/development-plans/{plan_id}", response_model=schemas.DevelopmentPlanResponse)
@@ -89,7 +89,7 @@ async def update_development_plan(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_active_user),
 ):
-    return await service.update_development_plan(db, plan_id, data.dict(exclude_unset=True))
+    return await service.update_development_plan(db, current_user, plan_id, data.dict(exclude_unset=True))
 
 
 @router.post("/development-plans/{plan_id}/ai-review", response_model=schemas.DevelopmentPlanResponse)
@@ -99,7 +99,7 @@ async def ai_review_plan(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_active_user),
 ):
-    return await service.ai_review_plan(db, plan_id, data.feedback)
+    return await service.ai_review_plan(db, current_user, plan_id, data.feedback)
 
 
 @router.post("/development-plans/{plan_id}/submit", response_model=schemas.DevelopmentPlanResponse)
@@ -108,7 +108,7 @@ async def submit_plan(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_active_user),
 ):
-    return await service.submit_plan(db, plan_id)
+    return await service.submit_plan(db, current_user, plan_id)
 
 
 @router.post("/development-plans/{plan_id}/approve", response_model=schemas.DevelopmentPlanResponse)
@@ -118,7 +118,7 @@ async def approve_plan(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_active_user),
 ):
-    return await service.approve_plan(db, plan_id, current_user, data.approved, data.comment)
+    return await service.approve_plan(db, current_user, plan_id, data.approved, data.comment)
 
 
 # Inheritance Suggestions
@@ -137,7 +137,7 @@ async def get_inheritance_suggestion(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_active_user),
 ):
-    return await service.get_inheritance_suggestion(db, suggestion_id)
+    return await service.get_inheritance_suggestion(db, current_user, suggestion_id)
 
 
 @router.post("/inheritance-suggestions/{suggestion_id}/accept", response_model=schemas.InheritanceSuggestionResponse)
@@ -146,7 +146,7 @@ async def accept_suggestion(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_active_user),
 ):
-    return await service.accept_suggestion(db, suggestion_id)
+    return await service.accept_suggestion(db, current_user, suggestion_id)
 
 
 @router.post("/inheritance-suggestions/{suggestion_id}/reject", response_model=schemas.InheritanceSuggestionResponse)
@@ -156,7 +156,7 @@ async def reject_suggestion(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_active_user),
 ):
-    return await service.reject_suggestion(db, suggestion_id, data.reason)
+    return await service.reject_suggestion(db, current_user, suggestion_id, data.reason)
 
 
 @router.get("/inheritance-suggestions/user/{user_id}/period/{period_id}", response_model=list[schemas.InheritanceSuggestionResponse])
@@ -166,4 +166,4 @@ async def get_user_period_suggestions(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_active_user),
 ):
-    return await service.get_user_period_suggestions(db, user_id, period_id)
+    return await service.get_user_period_suggestions(db, current_user, user_id, period_id)

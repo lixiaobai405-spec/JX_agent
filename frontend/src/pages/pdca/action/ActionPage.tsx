@@ -172,7 +172,7 @@ export function ActionPage() {
     },
   })
 
-  const { mutate: approveTeamPlan } = useMutation({
+  const { mutate: approveTeamPlan, isPending: approveTeamPending, variables: approvingPlanId } = useMutation({
     mutationFn: (id: string) => actionApi.approvePlan(id, true),
     onSuccess: () => {
       toast.success('IDP 已通过审批')
@@ -192,7 +192,7 @@ export function ActionPage() {
     },
   })
 
-  const { mutate: acceptSugg } = useMutation({
+  const { mutate: acceptSugg, isPending: acceptSuggPending, variables: acceptingSuggestionId } = useMutation({
     mutationFn: (id: string) => actionApi.acceptSuggestion(id),
     onSuccess: () => {
       toast.success('已采纳')
@@ -200,7 +200,7 @@ export function ActionPage() {
     },
   })
 
-  const { mutate: rejectSugg } = useMutation({
+  const { mutate: rejectSugg, isPending: rejectSuggPending } = useMutation({
     mutationFn: ({ id, reason }: { id: string; reason: string }) => actionApi.rejectSuggestion(id, reason),
     onSuccess: () => {
       toast.success('已拒绝')
@@ -209,6 +209,8 @@ export function ActionPage() {
       setRejectReason('')
     },
   })
+
+  const planMutationPending = savePlanPending || aiPending || acceptPending || submitPending
 
   if (!finalResult) {
     return (
@@ -241,12 +243,12 @@ export function ActionPage() {
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
             {pendingTeamPlans!.map((item) => (
-              <div key={item.id} className="flex items-start justify-between gap-3 rounded-md border p-3">
+              <div key={item.id} className="flex flex-col items-start gap-3 rounded-md border p-3 sm:flex-row sm:justify-between">
                 <div className="min-w-0 flex-1 text-sm">
                   <p className="font-medium truncate">{(item.goals as { text?: string }).text ?? '发展目标'}</p>
                   <p className="mt-1 text-muted-foreground line-clamp-2">{(item.actions as { text?: string }).text ?? '行动计划'}</p>
                 </div>
-                <div className="flex shrink-0 gap-2">
+                <div className="flex shrink-0 flex-wrap gap-2">
                   <Button
                     size="sm"
                     variant="outline"
@@ -254,10 +256,14 @@ export function ActionPage() {
                       setRejectPlanId(item.id)
                       setRejectPlanReason('')
                     }}
+                    disabled={approveTeamPending || rejectPlanPending}
                   >
                     退回
                   </Button>
-                  <Button size="sm" onClick={() => approveTeamPlan(item.id)}>通过</Button>
+                  <Button size="sm" onClick={() => approveTeamPlan(item.id)} disabled={approveTeamPending || rejectPlanPending}>
+                    {approveTeamPending && approvingPlanId === item.id && <RefreshCw data-icon="inline-start" className="animate-spin" />}
+                    {approveTeamPending && approvingPlanId === item.id ? '审批中...' : '通过'}
+                  </Button>
                 </div>
               </div>
             ))}
@@ -326,7 +332,10 @@ export function ActionPage() {
                   <div className="flex flex-col gap-1.5">
                     <Label>我的感想与反馈</Label>
                     <Textarea rows={3} value={feedback} onChange={(e) => setFeedback(e.target.value)} placeholder="对本期复盘报告的看法和补充..." />
-                    <Button size="sm" className="self-start" onClick={() => submitFeedback()} disabled={feedbackPending || !feedback.trim()}>提交反馈</Button>
+                    <Button size="sm" className="self-start" onClick={() => submitFeedback()} disabled={feedbackPending || !feedback.trim()}>
+                      {feedbackPending && <RefreshCw data-icon="inline-start" className="animate-spin" />}
+                      {feedbackPending ? '提交中...' : '提交反馈'}
+                    </Button>
                   </div>
                 </>
               )}
@@ -433,7 +442,7 @@ export function ActionPage() {
                         <Label>润色后的行动计划</Label>
                         <Textarea rows={4} value={polishedActionText} onChange={(e) => setPolishedActions(e.target.value)} className="bg-background" />
                       </div>
-                      <Button size="sm" className="self-start" onClick={() => acceptPolish()} disabled={acceptPending}>
+                      <Button size="sm" className="self-start" onClick={() => acceptPolish()} disabled={planMutationPending}>
                         {acceptPending && <RefreshCw data-icon="inline-start" className="animate-spin" />}
                         采纳润色建议
                       </Button>
@@ -459,7 +468,7 @@ export function ActionPage() {
                     variant="outline"
                     size="sm"
                     onClick={() => savePlanDraft()}
-                    disabled={savePlanPending || !planGoalText.trim()}
+                    disabled={planMutationPending || !planGoalText.trim()}
                   >
                     {savePlanPending && <RefreshCw data-icon="inline-start" className="animate-spin" />}
                     保存 IDP 草稿
@@ -468,13 +477,13 @@ export function ActionPage() {
                     variant="outline"
                     size="sm"
                     onClick={() => aiReviewPlan()}
-                    disabled={aiPending || !planGoalText.trim()}
+                    disabled={planMutationPending || !planGoalText.trim()}
                   >
                     {aiPending
                       ? <><RefreshCw data-icon="inline-start" className="animate-spin" />审核中...</>
                       : <><Sparkles data-icon="inline-start" />AI SMART 润色</>}
                   </Button>
-                  <Button size="sm" onClick={() => submitPlan()} disabled={submitPending || !planGoalText.trim()}>
+                  <Button size="sm" onClick={() => submitPlan()} disabled={planMutationPending || !planGoalText.trim()}>
                     {submitPending && <RefreshCw data-icon="inline-start" className="animate-spin" />}
                     {plan.carry_forward_reason ? '重新提交给经理审批' : '提交给经理审批'}
                   </Button>
@@ -499,7 +508,7 @@ export function ActionPage() {
                     variant="outline"
                     size="sm"
                     onClick={() => savePlanDraft()}
-                    disabled={savePlanPending || !planGoalText.trim()}
+                    disabled={planMutationPending || !planGoalText.trim()}
                   >
                     {savePlanPending && <RefreshCw data-icon="inline-start" className="animate-spin" />}
                     保存 IDP 草稿
@@ -508,13 +517,13 @@ export function ActionPage() {
                     variant="outline"
                     size="sm"
                     onClick={() => aiReviewPlan()}
-                    disabled={aiPending || !planGoalText.trim()}
+                    disabled={planMutationPending || !planGoalText.trim()}
                   >
                     {aiPending
                       ? <><RefreshCw data-icon="inline-start" className="animate-spin" />审核中...</>
                       : <><Sparkles data-icon="inline-start" />保存并 AI SMART 润色</>}
                   </Button>
-                  <Button size="sm" onClick={() => submitPlan()} disabled={submitPending || !planGoalText.trim()}>
+                  <Button size="sm" onClick={() => submitPlan()} disabled={planMutationPending || !planGoalText.trim()}>
                     {submitPending && <RefreshCw data-icon="inline-start" className="animate-spin" />}
                     提交给经理审批
                   </Button>
@@ -545,9 +554,9 @@ export function ActionPage() {
             ) : (
               <div className="flex flex-col gap-3">
                 {suggestions.map((sugg) => (
-                  <div key={sugg.id} className="flex items-start justify-between rounded-md border p-3">
-                    <div className="flex flex-col gap-1">
-                      <div className="flex items-center gap-2">
+                  <div key={sugg.id} className="flex flex-col items-start gap-3 rounded-md border p-3 sm:flex-row sm:justify-between">
+                    <div className="flex min-w-0 flex-1 flex-col gap-1">
+                      <div className="flex flex-wrap items-center gap-2">
                         <Badge variant="secondary">{SUGGESTION_TYPE_MAP[sugg.suggestion_type] ?? sugg.suggestion_type}</Badge>
                         <span className="text-sm">
                           {getSuggestionSummary(sugg.suggestions)}
@@ -555,9 +564,27 @@ export function ActionPage() {
                       </div>
                     </div>
                     {sugg.status === 'pending' ? (
-                      <div className="flex gap-1 shrink-0">
-                        <Button size="sm" variant="ghost" onClick={() => acceptSugg(sugg.id)}><ThumbsUp className="size-4" /></Button>
-                        <Button size="sm" variant="ghost" onClick={() => setRejectSuggestionId(sugg.id)}><ThumbsDown className="size-4" /></Button>
+                      <div className="flex shrink-0 gap-1">
+                        <Button
+                          size="icon-sm"
+                          variant="ghost"
+                          aria-label="采纳继承建议"
+                          title="采纳"
+                          onClick={() => acceptSugg(sugg.id)}
+                          disabled={acceptSuggPending || rejectSuggPending}
+                        >
+                          {acceptSuggPending && acceptingSuggestionId === sugg.id ? <RefreshCw className="animate-spin" /> : <ThumbsUp />}
+                        </Button>
+                        <Button
+                          size="icon-sm"
+                          variant="ghost"
+                          aria-label="拒绝继承建议"
+                          title="拒绝"
+                          onClick={() => setRejectSuggestionId(sugg.id)}
+                          disabled={acceptSuggPending || rejectSuggPending}
+                        >
+                          <ThumbsDown />
+                        </Button>
                       </div>
                     ) : (
                       <Badge variant={sugg.status === 'accepted' ? 'default' : 'outline'}>
@@ -583,7 +610,7 @@ export function ActionPage() {
             placeholder="请写明需要员工补充或修改的内容..."
           />
           <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setRejectPlanId(null)}>取消</Button>
+            <Button variant="outline" onClick={() => setRejectPlanId(null)} disabled={rejectPlanPending}>取消</Button>
             <Button
               onClick={() => rejectPlanId && rejectTeamPlan({ id: rejectPlanId, comment: rejectPlanReason })}
               disabled={rejectPlanPending || !rejectPlanReason.trim()}
@@ -601,8 +628,14 @@ export function ActionPage() {
           <DialogHeader><DialogTitle>拒绝原因</DialogTitle></DialogHeader>
           <Textarea rows={3} value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} placeholder="说明不采纳的原因..." />
           <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setRejectSuggestionId(null)}>取消</Button>
-            <Button onClick={() => rejectSuggestionId && rejectSugg({ id: rejectSuggestionId, reason: rejectReason })} disabled={!rejectReason.trim()}>确认拒绝</Button>
+            <Button variant="outline" onClick={() => setRejectSuggestionId(null)} disabled={rejectSuggPending}>取消</Button>
+            <Button
+              onClick={() => rejectSuggestionId && rejectSugg({ id: rejectSuggestionId, reason: rejectReason })}
+              disabled={rejectSuggPending || !rejectReason.trim()}
+            >
+              {rejectSuggPending && <RefreshCw data-icon="inline-start" className="animate-spin" />}
+              {rejectSuggPending ? '提交中...' : '确认拒绝'}
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

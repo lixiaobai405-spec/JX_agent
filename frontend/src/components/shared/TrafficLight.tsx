@@ -7,9 +7,9 @@ interface TrafficLightProps {
 }
 
 const MAP = {
-  green: { color: 'bg-green-500', label: '正常' },
-  yellow: { color: 'bg-yellow-400', label: '偏差分析' },
-  red: { color: 'bg-red-500', label: '预警' },
+  green: { color: 'bg-green-500', label: '优势项' },
+  yellow: { color: 'bg-yellow-400', label: '预警项' },
+  red: { color: 'bg-red-500', label: '风险项' },
 }
 
 export function TrafficLight({ status, showLabel = true, className }: TrafficLightProps) {

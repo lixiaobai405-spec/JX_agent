@@ -54,6 +54,10 @@ class EvaluationTaskResponse(BaseModel):
         from_attributes = True
 
 
+class PendingEvaluationCountResponse(BaseModel):
+    count: int = Field(ge=0)
+
+
 # Evaluation
 class EvaluationCreate(BaseModel):
     task_id: str

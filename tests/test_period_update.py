@@ -5,11 +5,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from pydantic import ValidationError
-from sqlalchemy import event
+from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from api.v1.periods.schemas import PeriodResponse, PeriodUpdate
-from api.v1.periods.service import update_period
+from api.v1.periods.service import update_period, update_period_status
 from core.database import Base
 from core.exceptions import (
     PeriodDateConflictError,
@@ -410,8 +410,16 @@ class PeriodUpdateConcurrencyTest(unittest.IsolatedAsyncioTestCase):
 
     async def _seed(self) -> User:
         admin = self._admin()
+        employee = User(
+            id="employee-1",
+            username="employee-1",
+            full_name="employee-1",
+            email="employee-1@example.com",
+            hashed_password="hashed",
+            role=UserRole.employee,
+        )
         async with self.Session() as session:
-            session.add_all([admin, self._period()])
+            session.add_all([admin, employee, self._period()])
             await session.commit()
         return admin
 
@@ -511,6 +519,69 @@ class PeriodUpdateConcurrencyTest(unittest.IsolatedAsyncioTestCase):
         self.assertLess(
             persisted.start_date.replace(tzinfo=timezone.utc),
             persisted.end_date.replace(tzinfo=timezone.utc),
+        )
+
+    async def test_concurrent_status_updates_leave_only_one_period_open(self):
+        admin = self._admin()
+        employee = User(
+            id="employee-1",
+            username="employee-1",
+            full_name="employee-1",
+            email="employee-1@example.com",
+            hashed_password="hashed",
+            role=UserRole.employee,
+        )
+        first_period = self._period()
+        first_period.status = PeriodStatus.draft
+        second_period = Period(
+            id="period-2",
+            user_id=employee.id,
+            name="Second period",
+            start_date=first_period.start_date,
+            end_date=first_period.end_date,
+            status=PeriodStatus.draft,
+        )
+        async with self.Session() as session:
+            session.add_all([admin, employee, first_period, second_period])
+            await session.commit()
+
+        async def open_period(period_id: str):
+            async with self.Session() as session:
+                session_admin = await session.get(User, admin.id)
+                return await update_period_status(
+                    session,
+                    session_admin,
+                    period_id,
+                    PeriodStatus.open,
+                )
+
+        results = await asyncio.gather(
+            open_period(first_period.id),
+            open_period(second_period.id),
+            return_exceptions=True,
+        )
+        self.assertEqual(sum(isinstance(result, Period) for result in results), 1)
+        self.assertEqual(
+            sum(isinstance(result, PeriodDateConflictError) for result in results),
+            1,
+        )
+
+        async with self.Session() as session:
+            periods = list(
+                (
+                    await session.execute(
+                        select(Period).where(
+                            Period.id.in_((first_period.id, second_period.id))
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+
+        self.assertEqual(
+            sum(period.status == PeriodStatus.open for period in periods),
+            1,
         )
 
 

@@ -2,6 +2,7 @@ import asyncio
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -29,10 +30,10 @@ from scripts.verify_d_stage_demo import verify_d_stage_demo
 
 
 SELF_ASSESSMENT_ITEMS = {
-    "区域净销售额": {"actual": 520, "self_score": 75, "comment": "核心便利系统铺货推进中，但成交转化偏慢。"},
-    "新品铺货率": {"actual": 70, "self_score": 78, "comment": "重点门店已进入谈判，部分门店排期延后。"},
-    "销售回款率": {"actual": 96, "self_score": 92, "comment": "大客户回款整体稳定。"},
-    "巡店SOP执行": {"actual": 90, "self_score": 90, "comment": "陈列和价签执行基本符合要求。"},
+    "区域净销售额": {"actual": 520, "score": 75, "comment": "核心便利系统铺货推进中，但成交转化偏慢。"},
+    "新品铺货率": {"actual": 70, "score": 78, "comment": "重点门店已进入谈判，部分门店排期延后。"},
+    "销售回款率": {"actual": 96, "score": 92, "comment": "大客户回款整体稳定。"},
+    "巡店SOP执行": {"actual": 90, "score": 90, "comment": "陈列和价签执行基本符合要求。"},
 }
 
 MANAGER_SCORES = {
@@ -74,12 +75,13 @@ async def _ensure_self_assessment(session, user: User, goal: Goal) -> SelfAssess
     elif assessment.status == SelfAssessmentStatus.draft:
         assessment = await check_service.update_self_assessment(
             session,
+            current_user=user,
             assessment_id=assessment.id,
             items=SELF_ASSESSMENT_ITEMS,
         )
 
     if assessment.status == SelfAssessmentStatus.draft:
-        assessment = await check_service.submit_self_assessment(session, assessment.id)
+        assessment = await check_service.submit_self_assessment(session, user, assessment.id)
 
     assert assessment.status == SelfAssessmentStatus.submitted, assessment.status
     return assessment
@@ -107,17 +109,26 @@ async def _ensure_evaluation_tasks(session, manager: User, goal: Goal, scorable_
 
 
 async def _submit_manager_evaluations(session, manager: User, tasks: list[EvaluationTask], indicators_by_id: dict[str, Indicator]) -> None:
-    for task in tasks:
-        if task.status == EvaluationTaskStatus.completed:
+    manager_actor = SimpleNamespace(id=manager.id, role=manager.role)
+    pending_inputs = [
+        (
+            task.id,
+            task.indicator_id,
+            task.status,
+            indicators_by_id[task.indicator_id].name,
+        )
+        for task in tasks
+    ]
+    for task_id, indicator_id, task_status, indicator_name in pending_inputs:
+        if task_status == EvaluationTaskStatus.completed:
             continue
-        indicator = indicators_by_id[task.indicator_id]
         await check_service.submit_evaluation(
             session,
-            current_user=manager,
-            task_id=task.id,
-            indicator_id=indicator.id,
-            score=MANAGER_SCORES[indicator.name],
-            comment=f"{indicator.name}经理评分",
+            current_user=manager_actor,
+            task_id=task_id,
+            indicator_id=indicator_id,
+            score=MANAGER_SCORES[indicator_name],
+            comment=f"{indicator_name}经理评分",
         )
 
 
@@ -142,6 +153,8 @@ async def verify_c_stage_demo() -> None:
             Goal.period_id == period.id,
             Goal.deleted_at.is_(None),
         )
+        goal_id = goal.id
+        manager_actor = SimpleNamespace(id=manager.id, role=manager.role)
 
         period.d_phase_completed = True
         await session.commit()
@@ -157,27 +170,27 @@ async def verify_c_stage_demo() -> None:
         indicators_by_id = {indicator.id: indicator for indicator in scorable_indicators}
 
         await _ensure_self_assessment(session, user, goal)
-        tasks = await _ensure_evaluation_tasks(session, manager, goal, scorable_indicators)
-        await _submit_manager_evaluations(session, manager, tasks, indicators_by_id)
+        tasks = await _ensure_evaluation_tasks(session, manager_actor, goal, scorable_indicators)
+        await _submit_manager_evaluations(session, manager_actor, tasks, indicators_by_id)
 
-        completed_tasks = await _tasks_for_goal(session, goal.id)
+        completed_tasks = await _tasks_for_goal(session, goal_id)
         assert completed_tasks, "No evaluation tasks found"
         assert all(task.status == EvaluationTaskStatus.completed for task in completed_tasks), "Not all tasks completed"
 
-        result = await check_service.generate_final_result(session, current_user=manager, goal_id=goal.id)
+        result = await check_service.generate_final_result(session, current_user=manager_actor, goal_id=goal_id)
         if result.status != FinalResultStatus.confirmed:
             assert result.status == FinalResultStatus.pending, result.status
         assert result.final_grade in {"S", "A", "B", "C"}, result.final_grade
 
-        score_aggregate = await _scalar_one(session, ScoreAggregate, ScoreAggregate.goal_id == goal.id)
-        final_result = await _scalar_one(session, FinalResult, FinalResult.goal_id == goal.id)
+        score_aggregate = await _scalar_one(session, ScoreAggregate, ScoreAggregate.goal_id == goal_id)
+        final_result = await _scalar_one(session, FinalResult, FinalResult.goal_id == goal_id)
         assert score_aggregate.final_score >= 0, score_aggregate.final_score
         assert final_result.id == result.id
 
         confirmed = (
             result
             if result.status == FinalResultStatus.confirmed
-            else await check_service.confirm_final_result(session, result.id, current_user=manager)
+            else await check_service.confirm_final_result(session, result.id, current_user=manager_actor)
         )
         assert confirmed.status == FinalResultStatus.confirmed, confirmed.status
 

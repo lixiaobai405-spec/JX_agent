@@ -23,7 +23,7 @@ async def get_job_analysis(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_active_user),
 ):
-    return await service.get_job_analysis(db, analysis_id)
+    return await service.get_job_analysis(db, current_user, analysis_id)
 
 
 @router.get("/job-analysis", response_model=list[schemas.JobAnalysisResponse])
@@ -87,7 +87,22 @@ async def get_contract(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_active_user),
 ):
-    return await service.get_contract(db, contract_id)
+    return await service.get_contract(db, current_user, contract_id)
+
+
+@router.put("/contracts/{contract_id}/targets", response_model=schemas.ContractResponse)
+async def update_contract_targets(
+    contract_id: str,
+    data: schemas.ContractTargetsUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_active_user),
+):
+    return await service.update_contract_targets(
+        db,
+        current_user,
+        contract_id,
+        [target.model_dump() for target in data.targets],
+    )
 
 
 @router.post("/contracts/{contract_id}/confirm", response_model=schemas.ContractResponse)
