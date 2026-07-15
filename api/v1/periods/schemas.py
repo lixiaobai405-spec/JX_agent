@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from models.check_phase import FinalResultStatus
 from models.do_phase import TrafficLightStatus
@@ -25,7 +25,8 @@ class PeriodUpdate(BaseModel):
     name: str | None = None
     start_date: datetime | None = None
     end_date: datetime | None = None
-    description: str | None = None
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class PeriodStatusUpdate(BaseModel):
